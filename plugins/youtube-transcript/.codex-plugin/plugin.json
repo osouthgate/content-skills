@@ -1,0 +1,38 @@
+{
+  "name": "youtube-transcript",
+  "version": "0.1.0",
+  "description": "Extract YouTube captions and transcripts, summarize transcript files, and fall back to OpenAI audio transcription when needed.",
+  "author": {
+    "name": "Ollie Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills/tree/main/plugins/youtube-transcript",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "youtube",
+    "transcript",
+    "captions",
+    "summarization",
+    "openai"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "YouTube Transcript",
+    "shortDescription": "Extract and summarize YouTube transcripts",
+    "longDescription": "A local content workflow plugin for extracting YouTube transcripts from captions, optionally falling back to OpenAI audio transcription, and summarizing YouTube or local transcript files.",
+    "developerName": "Ollie Southgate",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/osouthgate/content-skills",
+    "defaultPrompt": [
+      "Extract a transcript from this YouTube video.",
+      "Summarize this YouTube transcript file.",
+      "Fetch captions only for this long YouTube video."
+    ],
+    "brandColor": "#CC0000"
+  }
+}
