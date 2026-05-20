@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Transcript"
+  short_description: "Download captions and summarize YouTube videos"
+  default_prompt: "Use $youtube-transcript to extract a YouTube transcript and optionally summarize it."

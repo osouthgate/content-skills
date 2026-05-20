@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+transcripts/
+*.metadata.json
+*.summary.md
+*.transcript.md
+
