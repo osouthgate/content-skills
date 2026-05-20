@@ -15,6 +15,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,22 @@ DEPENDENCIES = {
     "yt_dlp": "yt-dlp",
     "openai": "openai",
     "requests": "requests",
+    "imageio_ffmpeg": "imageio-ffmpeg",
+}
+
+MEDIA_SUFFIXES = {
+    ".aac",
+    ".flac",
+    ".m4a",
+    ".mkv",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".mpeg",
+    ".mpga",
+    ".ogg",
+    ".wav",
+    ".webm",
 }
 
 
@@ -230,6 +247,64 @@ def transcribe_with_openai(
             response_format="text",
         )
     return str(result).strip()
+
+
+def ffmpeg_executable() -> str:
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+    imageio_ffmpeg = ensure_module("imageio_ffmpeg")
+    return str(imageio_ffmpeg.get_ffmpeg_exe())
+
+
+def split_media_to_audio_chunks(media_path: Path, work_dir: Path, chunk_seconds: int) -> list[Path]:
+    chunk_pattern = str(work_dir / "chunk_%04d.mp3")
+    command = [
+        ffmpeg_executable(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(media_path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "32k",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(chunk_seconds),
+        "-reset_timestamps",
+        "1",
+        chunk_pattern,
+    ]
+    subprocess.run(command, check=True)
+    chunks = sorted(work_dir.glob("chunk_*.mp3"))
+    if not chunks:
+        raise RuntimeError(f"Could not extract audio chunks from {media_path}")
+    return chunks
+
+
+def transcribe_local_media(
+    media_path: Path,
+    model: str,
+    api_key: str | None,
+    ask_for_key: bool,
+    chunk_seconds: int,
+) -> str:
+    with tempfile.TemporaryDirectory(prefix="local-media-transcribe-") as temp_dir:
+        chunks = split_media_to_audio_chunks(media_path, Path(temp_dir), chunk_seconds)
+        parts = []
+        for index, chunk in enumerate(chunks, start=1):
+            print(f"Transcribing chunk {index}/{len(chunks)}...", file=sys.stderr)
+            text = transcribe_with_openai(chunk, model, api_key, ask_for_key)
+            if text:
+                parts.append(f"<!-- chunk {index}/{len(chunks)} -->\n\n{text}")
+        return "\n\n".join(parts).strip()
 
 
 def resolve_ollama_model(model: str, host: str) -> str:
@@ -465,6 +540,12 @@ def parse_args() -> argparse.Namespace:
         help="OpenAI audio transcription model.",
     )
     parser.add_argument(
+        "--chunk-seconds",
+        type=int,
+        default=600,
+        help="Seconds per local audio/video chunk for OpenAI transcription.",
+    )
+    parser.add_argument(
         "--languages",
         default="en,en-GB,en-US",
         help="Comma-separated caption language priority list.",
@@ -501,6 +582,45 @@ def main() -> int:
     output_dir = resolve_output_dir(args.output_dir)
     raw_input = args.file or args.input or input("Paste YouTube URL, ID, or file path: ").strip()
     source_path = Path(raw_input).expanduser()
+
+    if source_path.exists() and source_path.suffix.lower() in MEDIA_SUFFIXES:
+        transcript = transcribe_local_media(
+            source_path,
+            args.openai_transcribe_model,
+            args.openai_api_key,
+            args.ask_openai_key,
+            args.chunk_seconds,
+        )
+        basename = output_basename_for_file(source_path)
+        metadata: dict[str, Any] = {
+            "source": "local_media_openai_audio_transcription",
+            "input_file": str(source_path.resolve()),
+            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "openai_transcribe_model": args.openai_transcribe_model,
+            "chunk_seconds": args.chunk_seconds,
+            "character_count": len(transcript),
+        }
+        transcript_path, metadata_path, _ = write_outputs(
+            output_dir, basename, transcript, metadata, None
+        )
+        print(f"Transcript: {transcript_path.resolve()}")
+        print(f"Metadata:   {metadata_path.resolve()}")
+
+        if not args.summary:
+            return 0
+
+        try:
+            summary = summarize_transcript(transcript, args, metadata)
+        except Exception as exc:
+            metadata["summary_error"] = f"{type(exc).__name__}: {exc}"
+            write_outputs(output_dir, basename, transcript, metadata, None)
+            print(f"Summary failed: {metadata['summary_error']}", file=sys.stderr)
+            return 1
+
+        _, _, summary_path = write_outputs(output_dir, basename, transcript, metadata, summary)
+        if summary_path:
+            print(f"Summary:    {summary_path.resolve()}")
+        return 0
 
     if args.file or source_path.exists():
         transcript = source_path.read_text(encoding="utf-8")

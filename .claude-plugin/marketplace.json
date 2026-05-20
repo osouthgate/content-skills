@@ -12,7 +12,7 @@
     {
       "name": "youtube-transcript",
       "source": "./youtube-transcript",
-      "description": "Extract YouTube captions/transcripts, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable."
+      "description": "Extract YouTube captions/transcripts, transcribe local audio/video files, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable."
     }
   ]
 }

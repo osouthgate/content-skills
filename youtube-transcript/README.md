@@ -42,6 +42,7 @@ Run the CLI:
 
 ```powershell
 python .\bin\youtube-transcript "https://www.youtube.com/watch?v=AgQ4cwL5eOM" --captions-only
+python .\bin\youtube-transcript "C:\Users\me\Downloads\talk.mp4"
 python .\bin\youtube-transcript "https://www.youtube.com/watch?v=AgQ4cwL5eOM" --summary
 python .\bin\youtube-transcript --file "C:\Users\me\Documents\video.transcript.md" --summary
 ```

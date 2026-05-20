@@ -1,6 +1,6 @@
 {
   "name": "youtube-transcript",
-  "description": "Extract YouTube captions/transcripts, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable.",
+  "description": "Extract YouTube captions/transcripts, transcribe local audio/video files, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable.",
   "version": "0.1.0",
   "author": {
     "name": "Oliver Southgate",
@@ -13,6 +13,8 @@
     "youtube",
     "transcript",
     "captions",
+    "video",
+    "audio",
     "summarization",
     "openai"
   ]
