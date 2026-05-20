@@ -120,6 +120,14 @@ def output_basename_for_file(path: Path) -> str:
     return sanitize_filename(stem, fallback="transcript")
 
 
+def default_output_dir() -> Path:
+    return Path.home() / "Documents" / "YouTube Transcripts"
+
+
+def resolve_output_dir(value: str) -> Path:
+    return Path(value).expanduser().resolve()
+
+
 def timestamp(seconds: float) -> str:
     seconds = max(0, float(seconds))
     whole = int(seconds)
@@ -475,8 +483,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        default="transcripts",
-        help="Directory for transcript, metadata, and optional summary files.",
+        default=str(default_output_dir()),
+        help=(
+            "Directory for transcript, metadata, and optional summary files. "
+            f"Defaults to {default_output_dir()}."
+        ),
     )
     return parser.parse_args()
 
@@ -487,6 +498,7 @@ def main() -> int:
     if args.transcribe_only:
         args.summary = False
 
+    output_dir = resolve_output_dir(args.output_dir)
     raw_input = args.file or args.input or input("Paste YouTube URL, ID, or file path: ").strip()
     source_path = Path(raw_input).expanduser()
 
@@ -500,7 +512,7 @@ def main() -> int:
             "character_count": len(transcript),
         }
         transcript_path, metadata_path, _ = write_outputs(
-            Path(args.output_dir), basename, transcript, metadata, None
+            output_dir, basename, transcript, metadata, None
         )
         print(f"Transcript: {transcript_path.resolve()}")
         print(f"Metadata:   {metadata_path.resolve()}")
@@ -516,7 +528,7 @@ def main() -> int:
             summary = summarize_transcript(transcript, args, metadata)
         except Exception as exc:
             metadata["summary_error"] = f"{type(exc).__name__}: {exc}"
-            write_outputs(Path(args.output_dir), basename, transcript, metadata, None)
+            write_outputs(output_dir, basename, transcript, metadata, None)
             print(f"Summary failed: {metadata['summary_error']}", file=sys.stderr)
             print(
                 "Tip: put OPENAI_API_KEY=sk-... in a .env file here, or set the "
@@ -526,7 +538,7 @@ def main() -> int:
             return 1
 
         _, _, summary_path = write_outputs(
-            Path(args.output_dir), basename, transcript, metadata, summary
+            output_dir, basename, transcript, metadata, summary
         )
         if summary_path:
             print(f"Summary:    {summary_path.resolve()}")
@@ -593,7 +605,7 @@ def main() -> int:
 
     basename = sanitize_filename(f"{video_id} {title}", fallback=video_id)
     transcript_path, metadata_path, _ = write_outputs(
-        Path(args.output_dir), basename, transcript, metadata, None
+        output_dir, basename, transcript, metadata, None
     )
     print(f"Transcript: {transcript_path.resolve()}")
     print(f"Metadata:   {metadata_path.resolve()}")
@@ -604,7 +616,7 @@ def main() -> int:
             summary = summarize_transcript(transcript, args, metadata)
         except Exception as exc:
             metadata["summary_error"] = f"{type(exc).__name__}: {exc}"
-            write_outputs(Path(args.output_dir), basename, transcript, metadata, None)
+            write_outputs(output_dir, basename, transcript, metadata, None)
             print(f"Summary failed: {metadata['summary_error']}", file=sys.stderr)
             print(
                 "Tip: put OPENAI_API_KEY=sk-... in a .env file here, or set the "
@@ -615,7 +627,7 @@ def main() -> int:
 
     if summary:
         transcript_path, metadata_path, summary_path = write_outputs(
-            Path(args.output_dir), basename, transcript, metadata, summary
+            output_dir, basename, transcript, metadata, summary
         )
         if summary_path:
             print(f"Summary:    {summary_path.resolve()}")

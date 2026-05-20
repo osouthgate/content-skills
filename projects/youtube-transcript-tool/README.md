@@ -37,6 +37,12 @@ Captions only:
 python .\yt_transcribe.py "https://www.youtube.com/watch?v=AgQ4cwL5eOM" --captions-only
 ```
 
+Custom output folder:
+
+```powershell
+python .\yt_transcribe.py "https://www.youtube.com/watch?v=AgQ4cwL5eOM" --output-dir "C:\Users\me\Documents\Transcripts"
+```
+
 Transcript plus OpenAI summary:
 
 ```powershell
@@ -55,4 +61,4 @@ Force audio transcription:
 python .\yt_transcribe.py "https://www.youtube.com/watch?v=VIDEO_ID" --audio-only
 ```
 
-Outputs are written to `transcripts/` by default.
+Outputs are written to `~/Documents/YouTube Transcripts` by default so running the script from a git repo does not create transcript files in the checkout.

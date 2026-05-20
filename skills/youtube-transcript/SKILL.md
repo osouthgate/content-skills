@@ -19,8 +19,9 @@ Default behavior for YouTube input:
 
 - Try YouTube captions first with `youtube-transcript-api`.
 - If captions fail, download audio with `yt-dlp` and transcribe with OpenAI.
-- Write `.transcript.md` and `.metadata.json` into `transcripts/`.
+- Write `.transcript.md` and `.metadata.json` into `~/Documents/YouTube Transcripts`.
 - Do not summarize unless `--summary` is supplied.
+- Use `--output-dir "path\to\folder"` when the user asks for a specific output folder. Prefer a user data folder, not a git repo checkout.
 
 ## Common Tasks
 
@@ -28,6 +29,12 @@ Captions only, no audio fallback:
 
 ```powershell
 python scripts\yt_transcribe.py "https://www.youtube.com/watch?v=VIDEO_ID" --captions-only
+```
+
+Custom output folder:
+
+```powershell
+python scripts\yt_transcribe.py "https://www.youtube.com/watch?v=VIDEO_ID" --output-dir "C:\Users\me\Documents\Transcripts"
 ```
 
 Transcript plus OpenAI summary:
