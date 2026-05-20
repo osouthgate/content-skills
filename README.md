@@ -1,15 +1,24 @@
 # Content Skills
 
-Reusable content workflows, Codex skills, and small helper projects.
+Reusable content workflow plugins for Claude Code and Codex.
+
+## Marketplace
+
+This repo exposes a Claude-compatible marketplace at:
+
+```text
+.claude-plugin/marketplace.json
+```
+
+Install from Claude Code:
+
+```bash
+claude plugin marketplace add osouthgate/content-skills
+claude plugin install youtube-transcript@content-skills
+```
 
 ## Plugins
 
-- `plugins/youtube-transcript` - Claude/Codex plugin packaging for the YouTube transcript skill.
+- `youtube-transcript` - Extract YouTube captions/transcripts, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable.
 
-## Skills
-
-- `skills/youtube-transcript` - Extract YouTube captions/transcripts, summarize transcripts, and fall back to OpenAI audio transcription when captions are unavailable.
-
-## Projects
-
-- `projects/youtube-transcript-tool` - Standalone CLI version of the YouTube transcript workflow.
+Each plugin owns one canonical skill folder under `skills/<skill-name>/`. Standalone CLI launchers should call into that skill resource folder rather than copy the implementation.

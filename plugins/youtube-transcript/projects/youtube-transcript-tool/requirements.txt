@@ -1,5 +1,0 @@
-youtube-transcript-api
-yt-dlp
-openai
-requests
-
