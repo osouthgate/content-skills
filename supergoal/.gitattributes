@@ -1,0 +1,7 @@
+# Shell scripts must check out with LF on every platform. A CRLF shebang
+# (#!/usr/bin/env bash\r) yields a "bad interpreter" failure on Unix, so eol=lf
+# is mandatory and overrides any global core.autocrlf=true.
+*.sh text eol=lf
+
+# PowerShell tolerates either ending under pwsh; let git normalize on commit.
+*.ps1 text

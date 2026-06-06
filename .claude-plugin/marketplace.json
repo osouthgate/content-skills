@@ -5,7 +5,7 @@
     "url": "https://github.com/osouthgate"
   },
   "metadata": {
-    "description": "Content workflow plugins for transcript extraction, summarization, and reusable publishing tasks.",
+    "description": "Content and workflow plugins: transcript extraction, summarization, reusable publishing tasks, and autonomous planning/execution.",
     "version": "0.1.0"
   },
   "plugins": [
@@ -13,6 +13,11 @@
       "name": "youtube-transcript",
       "source": "./youtube-transcript",
       "description": "Extract YouTube captions/transcripts, transcribe local audio/video files, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable."
+    },
+    {
+      "name": "supergoal",
+      "source": "./supergoal",
+      "description": "Plan and autonomously build a software task end-to-end under a single /goal, with retry, fix-spec recovery, per-phase memory writeback, and a final audit. Cross-platform (PowerShell + POSIX helpers). Adapted for Windows from supergoal by Robert Courson."
     }
   ]
 }
