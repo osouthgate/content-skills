@@ -75,12 +75,15 @@ $cand = @(
   "$env:USERPROFILE\.claude\skills\supergoal\SKILL.md",
   "$PWD\.claude\skills\supergoal\SKILL.md"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $cand) { throw "supergoal: SKILL.md not found under ~\.claude\skills\supergoal or .\.claude\skills\supergoal" }
 $env:SUPERGOAL_DIR = Split-Path -Parent $cand
 if (-not $env:SUPERGOAL_ROOT) { $env:SUPERGOAL_ROOT = '.supergoal' }
 New-Item -ItemType Directory -Force -Path "$env:SUPERGOAL_ROOT\goals" | Out-Null
 "SUPERGOAL_DIR=$env:SUPERGOAL_DIR"
 "SUPERGOAL_ROOT=$env:SUPERGOAL_ROOT"
 ```
+
+> **Shell-session note (Windows).** `$env:SUPERGOAL_DIR` / `$env:SUPERGOAL_ROOT` live in the current shell. If your host runs each command in a fresh process (env vars don't persist between separate tool calls), either set them in the **same** command that invokes a helper, or substitute the absolute path. The same caveat applies to the bash `export`s above.
 
 All artifacts live under `$SUPERGOAL_ROOT`. Skill assets (scripts, references, templates) live under `$SUPERGOAL_DIR`.
 
@@ -115,16 +118,21 @@ fi
 **Windows / PowerShell** (the Claude projects dir mangles the cwd path, e.g. `C--Users-osout`; probe the glob plus the common fallbacks):
 
 ```powershell
-$MemDir = @(
-  (Get-ChildItem "$env:USERPROFILE\.claude\projects\*\memory" -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName),
-  "$env:USERPROFILE\.claude\memory",
-  "$PWD\.claude\memory",
-  "$env:SUPERGOAL_ROOT\memory"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+# Build a FLAT candidate list (+= flattens; a comma-array would nest the glob
+# result and stringify multiple project dirs into one space-joined path).
+$candidates = @()
+$candidates += (Get-ChildItem "$env:USERPROFILE\.claude\projects\*\memory" -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName)
+$candidates += "$env:USERPROFILE\.claude\memory"
+$candidates += "$PWD\.claude\memory"
+$candidates += "$env:SUPERGOAL_ROOT\memory"
+# Prefer a dir that actually holds a MEMORY.md index (matters when there are
+# several project memory dirs); else fall back to the first existing dir.
+$MemDir = $candidates | Where-Object { $_ -and (Test-Path (Join-Path $_ 'MEMORY.md')) } | Select-Object -First 1
+if (-not $MemDir) { $MemDir = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1 }
 "MEM_DIR=$MemDir"
-if ($MemDir -and (Test-Path "$MemDir\MEMORY.md")) {
+if ($MemDir -and (Test-Path (Join-Path $MemDir 'MEMORY.md'))) {
   "--- MEMORY INDEX ---"
-  Get-Content "$MemDir\MEMORY.md"
+  Get-Content (Join-Path $MemDir 'MEMORY.md')
 }
 ```
 
