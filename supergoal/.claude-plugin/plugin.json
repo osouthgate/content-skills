@@ -1,0 +1,22 @@
+{
+  "name": "supergoal",
+  "description": "Plan and autonomously build a software task end-to-end. Recons the codebase, applies preloaded memory, decomposes into the right number of phases, gets one confirmation, then prepares a single ready-to-paste /goal command that drives execution to completion with built-in retry, fix-spec recovery, and per-phase memory writeback. Cross-platform: ships parity PowerShell (.ps1) and POSIX (.sh) helpers. Adapted for Windows from supergoal by Robert Courson.",
+  "version": "0.6.1-win.1",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "planning",
+    "autonomous",
+    "agent",
+    "goal",
+    "workflow",
+    "windows",
+    "powershell",
+    "cross-platform"
+  ]
+}
