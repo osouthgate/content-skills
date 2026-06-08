@@ -18,6 +18,11 @@
       "name": "supergoal",
       "source": "./supergoal",
       "description": "Plan and autonomously build a software task end-to-end under a single /goal, with retry, fix-spec recovery, per-phase memory writeback, and a final audit. Cross-platform (PowerShell + POSIX helpers). Adapted for Windows from supergoal by Robert Courson."
+    },
+    {
+      "name": "autonomous-run",
+      "source": "./autonomous-run",
+      "description": "Configure Claude Code for a long unattended run: auto permissions, dynamic-workflow subagent fan-out, /goal or /loop persistence, cloud execution, and end-to-end self-verification. Detects which levers are available and hands off cleanly. Pairs with supergoal."
     }
   ]
 }
