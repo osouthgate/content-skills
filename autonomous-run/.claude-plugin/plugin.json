@@ -1,0 +1,23 @@
+{
+  "name": "autonomous-run",
+  "description": "Configure Claude Code for a long unattended run. Sets the operating posture — auto permissions, dynamic-workflow subagent fan-out, /goal or /loop persistence, cloud execution, and end-to-end self-verification — that lets Claude keep working autonomously for hours or days without babysitting. Detects which levers are available this session and hands off cleanly. Pairs with the supergoal skill for planned multi-phase builds.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "autonomous",
+    "unattended",
+    "agent",
+    "goal",
+    "loop",
+    "subagents",
+    "dynamic-workflows",
+    "self-verification",
+    "claude-code"
+  ]
+}

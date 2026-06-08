@@ -103,13 +103,16 @@ For each phase, list what the agent must print into the conversation to prove co
 - **Diff snippets** — key changes inline, not full diffs
 - **Screenshots** — for UI phases, paths to screenshots saved during execution
 - **API responses** — `curl -X POST ... | jq` outputs for new endpoints
+- **End-to-end self-verification** — when `capabilities.md` records a verification surface, a phase that ships user-facing behavior must exercise the **running** thing, not just unit checks: load the app via the browser driver and assert on real UI (web), boot the simulator and drive the new screen (mobile), or start the full service and hit the real endpoint (backend). This becomes the `E2E:` line in `SUPERGOAL_PHASE_VERIFY`; the audit counts a present-surface E2E assertion as re-verified, a `none` surface as trust-prior. Build/test/lint prove the code compiles — only this proves it works. See `claude-capabilities.md`.
 - **STATE.md update** — the new content of the phase's row
 
 ## Dependencies
 
 State them explicitly. Phase 4 depends on phases 1, 2 and 3 — not "the previous ones". This lets you reason about whether mid-chain interruption breaks the next phase.
 
-Almost always linear (1 → 2 → 3 → 4 → 5). True parallel phases are rare in a single-session goal chain; if you find yourself wanting them, you probably want sub-tasks within a phase, not a parallel phase.
+The dependency line is also the **parallelization gate**, so state the *minimal* real dependencies. On Codex (and any host without a subagent primitive) the chain runs linearly regardless, so over-stating dependencies costs nothing there — but on Claude Code, subagent fan-out runs every **ready set** of independent phases concurrently (see `claude-capabilities.md`), and a too-conservative `2 → 3 → 4` when 3 and 4 both only need 2 silently throws away that parallel speed. Two rules when phases can fan out: their **deliverables must not overlap** (parallel workers editing the same files corrupt each other — serialize or worktree-isolate those), and the Polish & Harden phase depends on everything so it always runs last and solo.
+
+This refines, not contradicts, the old "true parallel phases are rare" guidance: that holds for a **single-session, single-agent** loop, where wanting parallel phases usually means you wanted sub-tasks within one phase. Subagent fan-out *is* the mechanism that makes independent phases genuinely parallelizable — and the dependency graph you write here is exactly what gates it.
 
 ## The Polish & Harden phase — non-negotiable
 

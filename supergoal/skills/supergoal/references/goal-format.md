@@ -19,16 +19,18 @@ Supergoal uses **one** `/goal` per run, dispatched by the **user** at the end of
 The condition is:
 
 ```
-Execute all phases of .supergoal/ROADMAP.md sequentially.
-Read .supergoal/phases/phase-N.md for each phase; do the work;
-run mandatory commands; print SUPERGOAL_PHASE_VERIFY then
-SUPERGOAL_PHASE_DONE for each phase; follow the failure-recovery
-protocol in .supergoal/PROTOCOL.md if any criterion fails. After
-the last phase, run the FINAL AUDIT in PROTOCOL.md (re-verify
-against ROADMAP.md; re-run aggregated mandatory commands;
-spot-check criteria; on gaps, write audit-fix-<round>.md and
-execute inline). Only after AUDIT_COMPLETE, print
-SUPERGOAL_RUN_COMPLETE.
+Execute all phases of .supergoal/ROADMAP.md in dependency order
+(read .supergoal/capabilities.md; if subagent fan-out is
+available, run each ready set of independent phases in parallel,
+else sequentially). Read .supergoal/phases/phase-N.md for each
+phase; do the work; run mandatory commands; print
+SUPERGOAL_PHASE_VERIFY then SUPERGOAL_PHASE_DONE for each phase;
+follow the failure-recovery protocol in .supergoal/PROTOCOL.md if
+any criterion fails. After the last phase, run the FINAL AUDIT in
+PROTOCOL.md (re-verify against ROADMAP.md; re-run aggregated
+mandatory commands; spot-check criteria; on gaps, write
+audit-fix-<round>.md and execute inline). Only after
+AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE.
 
 Done when SUPERGOAL_RUN_COMPLETE appears in the transcript with
 one SUPERGOAL_PHASE_DONE per phase, AUDIT_COMPLETE printed before
@@ -36,7 +38,7 @@ SUPERGOAL_RUN_COMPLETE, and no FAILURE_HANDOFF or AUDIT_HANDOFF
 this run.
 ```
 
-This works on both hosts. There is no per-phase `/goal` dispatch and no inter-session chain — once active, a single `/goal` session reads PROTOCOL.md, loops through every phase spec, runs the final audit, and only completes when the audit is clean.
+This works on both hosts. There is no per-phase `/goal` dispatch and no inter-session chain — once active, a single `/goal` session reads PROTOCOL.md and `capabilities.md`, drives every phase spec (sequentially on Codex; independent phases in parallel via subagent fan-out on Claude Code — same plan, same per-phase contract either way), runs the final audit, and only completes when the audit is clean. See `claude-capabilities.md` for the capability profile.
 
 ## Required transcript blocks (Supergoal-specific)
 
@@ -68,6 +70,7 @@ Engineering:
 - typecheck: <pass|fail>
 - lint: <pass|fail|pre-existing>
 - tests: <pass|fail|N pre-existing>
+E2E: <surface (web|mobile|service): pass|fail — evidence, or "none — unit evidence only">   (per capabilities.md; behavior-shipping phases)
 Cleanliness (grep `repo-state.sh added-lines` vs Baseline ref — incl. uncommitted + untracked; non-zero unless phase spec sets "Cleanliness override:"):
 - debug prints added (console.log / print / etc.): <count>
 - session TODO/FIXME added: <count>

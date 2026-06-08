@@ -37,7 +37,7 @@ If a phase can't be measured, it isn't a phase. Rewrite it until it can.
 
 ## How this skill works (one-shot summary)
 
-0. **Available context** — preload memory; detect available tools (Context7, WebSearch, MCPs, skills); resume any in-progress Supergoal state
+0. **Available context** — preload memory; detect available tools (Context7, WebSearch, MCPs, skills) **and host capabilities (Claude Code vs Codex: subagent fan-out, end-to-end verification surfaces)**; resume any in-progress Supergoal state
 1. **Intake** — restate, classify, ask enough questions to cover every material gap. Greenfield walks the full category checklist (platform, stack, design direction, integrations, scope, audience, perf, data model) in batches of up to 4 until everything material is filled in; brownfield asks 0–2 since recon answers most structural questions.
 2. **Recon** — parallel codebase + environment scan
 3. **Deep think** — research best practices with whatever tools exist (optional, not required); list top-3 risks + dependencies
@@ -150,6 +150,19 @@ Tools differ between sessions and hosts (Claude Code vs Codex, different MCP ser
 - **Prior Supergoal state** — if `$SUPERGOAL_ROOT/STATE.md` exists from a previous run, read it; resume rather than restart.
 
 Write detected tools to `$SUPERGOAL_ROOT/tools.md`. Stage 3 and the phase goals reference this file when deciding what to invoke.
+
+### Host & capability detection
+
+The plan Supergoal produces is host-agnostic, but Claude Code and Codex have different **execution** capabilities — and a run that ignores the difference leaves Claude's strengths unused. Detect the capability profile once here and record it; later stages read it to decide *how* phases are driven, never *what the plan is*.
+
+Inspect the tool list and environment (don't guess) and write `$SUPERGOAL_ROOT/capabilities.md`, one line per field (`field: <value> — <signal>`):
+
+- **Host** — `Agent`/Task tool + `AskUserQuestion` + a skills list ⇒ **Claude Code**; otherwise **Codex**.
+- **Subagent fan-out** — `Agent`/Task tool present ⇒ independent phases can run in parallel (Stage 4 / phase loop). Absent ⇒ sequential single-session execution (the portable default).
+- **End-to-end verify surfaces** — browser-driver tools (Claude in Chrome, Playwright, `mcp__*` browser) ⇒ web E2E; iOS/Android simulator MCP ⇒ mobile E2E; a runnable dev/serve command (`package.json` scripts, `Makefile`, `Procfile`, `docker compose`) ⇒ service E2E. None ⇒ unit evidence only.
+- **`/loop`, cloud/ephemeral** — record for the Stage 7 hand-off (commit-cadence note on cloud); these are operating-posture levers owned by the `autonomous-run` companion skill, not toggled by Supergoal.
+
+**Capabilities are additive and degrade gracefully** — a missing capability means "use the portable fallback," never "fail." Full profile and exactly how each capability changes execution: `references/claude-capabilities.md`.
 
 ### Resume detection
 
@@ -291,8 +304,10 @@ Each phase has:
 - **Deliverables** (concrete files/features that will exist when done)
 - **Acceptance criteria** (5–10 measurable items)
 - **Mandatory commands** (build, typecheck, lint, test that must pass)
-- **Evidence required** (what the agent must print into the transcript to prove completion)
+- **Evidence required** (what the agent must print into the transcript to prove completion — when `capabilities.md` records an E2E surface, the behavior-shipping phases must include an **end-to-end self-verification** against it, not just unit checks; see `references/claude-capabilities.md`)
 - **Dependencies** (which prior phases must be done)
+
+**Make dependencies precise — they double as the parallelization gate.** The `Depends on phases:` line is not just documentation: on Claude Code (subagent fan-out available per `capabilities.md`), the phase loop runs every **ready set** (phases whose dependencies are already complete) concurrently, then recomputes. So an accurate dependency graph directly buys parallel speed. State the *minimal* real dependencies — don't write `2 → 3 → 4` if 3 and 4 both only need 2. Two cautions: phases that fan out in parallel must have **non-overlapping deliverables** (parallel workers editing the same files corrupt each other — serialize or worktree-isolate those), and the Polish & Harden phase depends on everything, so it always runs last and solo. On Codex (no `Agent` tool), the same graph just executes sequentially — identical plan, different drive.
 
 ---
 
@@ -438,7 +453,7 @@ Slash commands on both Claude Code and Codex fire **only from user input** — a
 
 ````
 ```
-/goal "Execute all phases of .supergoal/ROADMAP.md sequentially. Read .supergoal/phases/phase-N.md for each phase; do the work; run mandatory commands; print SUPERGOAL_PHASE_VERIFY then SUPERGOAL_PHASE_DONE for each phase; follow the failure-recovery protocol in .supergoal/PROTOCOL.md if any criterion fails. After the last phase, run the FINAL AUDIT in PROTOCOL.md (re-verify against ROADMAP.md; re-run aggregated mandatory commands; spot-check criteria; on gaps, write audit-fix-<round>.md and execute inline). Only after AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE. Done when SUPERGOAL_RUN_COMPLETE appears in the transcript with one SUPERGOAL_PHASE_DONE per phase, AUDIT_COMPLETE printed before SUPERGOAL_RUN_COMPLETE, and no FAILURE_HANDOFF or AUDIT_HANDOFF this run."
+/goal "Execute all phases of .supergoal/ROADMAP.md in dependency order (read .supergoal/capabilities.md; if subagent fan-out is available, run each ready set of independent phases in parallel, else sequentially). Read .supergoal/phases/phase-N.md for each phase; do the work; run mandatory commands; print SUPERGOAL_PHASE_VERIFY then SUPERGOAL_PHASE_DONE for each phase; follow the failure-recovery protocol in .supergoal/PROTOCOL.md if any criterion fails. After the last phase, run the FINAL AUDIT in PROTOCOL.md (re-verify against ROADMAP.md; re-run aggregated mandatory commands; spot-check criteria; on gaps, write audit-fix-<round>.md and execute inline). Only after AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE. Done when SUPERGOAL_RUN_COMPLETE appears in the transcript with one SUPERGOAL_PHASE_DONE per phase, AUDIT_COMPLETE printed before SUPERGOAL_RUN_COMPLETE, and no FAILURE_HANDOFF or AUDIT_HANDOFF this run."
 ```
 ````
 
@@ -550,6 +565,7 @@ Write the memory file under the detected MEM_DIR using the standard `name` / `de
 - **One `/goal`, short condition.** `/goal` takes an end-state, not a task body. Long content lives in files the agent reads from disk. This is the natural shape on both Claude Code and Codex.
 - **Frictionless is the goal.** Memory + prompt + recon should answer most questions. Zero clarifying questions on well-described tasks is a win.
 - **Adapt to available tools.** Detect what's there (Context7, WebSearch, MCPs, skills). Use what's available; degrade gracefully without it. Never hard-require a tool that might not be present.
+- **Adapt to host capabilities.** Detect host + capabilities at Stage 0 (`capabilities.md`). On Claude Code, drive independent phases in parallel via subagent fan-out and verify behavior end-to-end against any detected surface; on Codex, run the same plan sequentially with unit evidence. Capabilities change *how* phases are driven and *how deeply* verified — never *what the plan is*. Degrade gracefully; the portable path is always the default. See `references/claude-capabilities.md`.
 - **Memory is load-bearing.** Preload at Stage 0, surface as "Applied from memory: …" in Stage 1, write back at every phase boundary.
 - **"Perfect" is not a stopping condition — criteria are.** Translate every "perfect" into observable, falsifiable criteria.
 - **Two human gates, no more.** Clarifying gaps (Stage 1 — walk the full category checklist for greenfield in batches of up to 4 until all material info is gathered; often zero for brownfield) and plan review (Stage 6). Between and after, autonomous.
@@ -573,6 +589,8 @@ Write the memory file under the detected MEM_DIR using the standard `name` / `de
 - `references/planning-depth.md` — what makes a plan deep enough to deserve "Super"
 - `references/phase-design.md` — how to slice phases that auto-chain cleanly
 - `references/goal-format.md` — what `/goal` is on Claude Code + Codex, Supergoal's single-`/goal` shape, required transcript blocks
+- `references/claude-capabilities.md` — Claude vs Codex capability profile (`capabilities.md`): subagent fan-out for independent phases, end-to-end self-verification surfaces, and how each changes execution
+- `references/repo-state-comparison.md` — complete-working-tree-vs-baseline comparison strategy used by the cleanliness + deliverable checks
 
 ## Scripts
 
