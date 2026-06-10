@@ -14,7 +14,7 @@ Key implications:
 
 ## Supergoal's single-`/goal` shape
 
-Supergoal uses **one** `/goal` per run, dispatched by the **user** at the end of Stage 7. Slash commands fire only from user input on both Claude Code and Codex — the planner cannot fire `/goal` from its own message text. Stage 7's job is to write all phase specs to disk, then print a copy-paste-ready `/goal` block. The user pastes once; from there, the run is autonomous.
+Supergoal uses **one** `/goal` per run, dispatched by the **user** at the end of Stage 7. Slash commands fire only from user input on both Claude Code and Codex — the planner cannot fire `/goal` from its own message text. Stage 7's job is to write all phase specs to disk, persist the dispatch line to `.supergoal/goals/goal_prompt.md` (so it survives context compaction, a closed session, or a handoff to another checkout — the chat print is just a convenience copy of that file), then print a copy-paste-ready `/goal` block. The user pastes once; from there, the run is autonomous.
 
 The condition is:
 

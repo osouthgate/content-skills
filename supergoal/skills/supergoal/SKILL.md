@@ -166,7 +166,10 @@ Inspect the tool list and environment (don't guess) and write `$SUPERGOAL_ROOT/c
 
 ### Resume detection
 
-If `STATE.md` exists and shows `Status: IN_PROGRESS` with a phase pending, **do not re-plan**. Print a one-line "Resuming Supergoal from phase N" and jump straight to Stage 6 (plan review) with the existing artifacts, or directly to Stage 7 (dispatch) if the user confirms resume.
+If `STATE.md` exists and shows `Status: READY_TO_DISPATCH` or `Status: IN_PROGRESS`, **do not re-plan** — a previous run already produced the plan, and at `READY_TO_DISPATCH` or beyond it also persisted the dispatch line at `.supergoal/goals/goal_prompt.md`. Print a one-line "Resuming Supergoal from phase N", then re-validate before re-issuing:
+
+- **Baseline still matches** (`STATE.md`'s `Baseline ref:` equals `git rev-parse HEAD`) **and pre-flight (Stage 6.5) still green** → point the user straight at **`.supergoal/goals/goal_prompt.md`** as the canonical re-dispatch line. Its `/goal` command is verbatim-identical to the end-state condition the original run committed to, so re-pasting from this file is what guarantees the host evaluator can still clear — a line reconstructed from memory may differ and never resolve.
+- **Baseline drifted** (work landed since) **or pre-flight now red** → re-capture the baseline and re-run pre-flight, then fall through to Stage 6 (plan review) / Stage 7, which **regenerates** `goal_prompt.md` with the fresh baseline before handing it back.
 
 ---
 
@@ -415,6 +418,8 @@ Then call `AskUserQuestion` with one question, header "Start chain?", offering *
 
 Keep options at 4 max. If the user picks any revision option, follow up with a second `AskUserQuestion` to pin down exactly what (e.g., "Which assumption?" with the assumptions listed). Apply the change, update ROADMAP/THINKING/STATE and the affected phase specs, re-run `validate-phase.sh` on each touched spec, then re-show the Stage 6 summary and ask again. Loop until "Start now" or user aborts.
 
+**If a revision changes the phase count, any phase spec, or `ROADMAP.md`, and `.supergoal/goals/goal_prompt.md` already exists** (a prior dispatch is being resumed and re-edited), **regenerate `goal_prompt.md` from the revised plan in the same step** — header and verbatim `/goal` command both. The persisted dispatch condition must never drift from the plan it drives; a stale paste line pointing at an obsolete phase set is exactly the failure this file is meant to prevent.
+
 **Wait for the answer.** Do not dispatch `/goal` until the user picks "Start now". Never assume confirmation; never start the chain on silence.
 
 ---
@@ -449,7 +454,11 @@ Slash commands on both Claude Code and Codex fire **only from user input** — a
 3. Verify each `.supergoal/phases/phase-N.md` exists; validate each:
    - Unix / git-bash: `bash "$SUPERGOAL_DIR/scripts/validate-phase.sh" .supergoal/phases/phase-<N>.md`
    - Windows / PowerShell: `pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\validate-phase.ps1" .supergoal\phases\phase-<N>.md`
-4. Print a fenced code block with the **ready-to-paste `/goal` command** — the condition below is short, instructional but measurable, and well under the 4000-char `/goal` argument limit:
+4. **Persist the dispatch line to disk.** Write `.supergoal/goals/goal_prompt.md` — the trigger that binds ROADMAP/STATE/phases/PROTOCOL together is otherwise the one load-bearing artifact of a Supergoal run that lives only in chat scrollback. Persisting it means a deferred dispatch survives context compaction and closed sessions, a re-dispatch after BLOCKED/interruption uses a verbatim-identical end-state condition (reconstruction from memory risks a condition the evaluator never clears), and a teammate or second machine can dispatch from the repo checkout alone. The file contains, in order:
+   - **A short header** — task title, dispatch date, total phase count, and the baseline ref(s) captured in step 1. A multi-repo run records one SHA per repo, one line each. (The dispatch date + baseline ref are the staleness guard: they make a stale paste detectable against `git rev-parse HEAD`.)
+   - **The exact `/goal` command, verbatim, in a fenced block** — byte-for-byte identical to what step 5 prints in chat (same command string; do not reword or re-wrap it). This file is the canonical copy; the chat print is the convenience copy.
+   - **One line of instructions**, exactly: "Paste the `/goal` line into your input to dispatch. If significant time has passed or the baseline ref no longer matches HEAD, re-run `/supergoal` to resume — it will re-capture the baseline and re-run pre-flight before re-issuing this file."
+5. Print a fenced code block with the **ready-to-paste `/goal` command** — identical to the one just written to `goal_prompt.md`; the condition below is short, instructional but measurable, and well under the 4000-char `/goal` argument limit:
 
 ````
 ```
@@ -457,11 +466,11 @@ Slash commands on both Claude Code and Codex fire **only from user input** — a
 ```
 ````
 
-5. Follow the fenced block with **exactly this one-line instruction**:
+6. Follow the fenced block with **exactly this one-line instruction**:
 
-> **Paste the `/goal` line above into your input to dispatch the chain.** From there it runs autonomously — auto-retry, fix-spec recovery, per-phase memory writeback — until `SUPERGOAL_RUN_COMPLETE` appears.
+> **Paste the `/goal` line above into your input to dispatch the chain.** It's also saved at `.supergoal/goals/goal_prompt.md`, so you can dispatch later or from another checkout even if this session closes. From there it runs autonomously — auto-retry, fix-spec recovery, per-phase memory writeback — until `SUPERGOAL_RUN_COMPLETE` appears.
 
-6. **Stop.** Do not generate any further output. The Supergoal invocation ends here. The user's paste begins the autonomous run under a fresh `/goal` session, which reads `PROTOCOL.md`, `ROADMAP.md`, `STATE.md`, and the phase specs from disk and runs the loop documented in the next sections.
+7. **Stop.** Do not generate any further output. The Supergoal invocation ends here. The user's paste begins the autonomous run under a fresh `/goal` session, which reads `PROTOCOL.md`, `ROADMAP.md`, `STATE.md`, and the phase specs from disk and runs the loop documented in the next sections.
 
 Once `/goal` is active (you'll see the `◎ /goal active` indicator on Claude Code), the per-turn evaluator keeps the agent working until the end-state condition holds. On Codex, the auto-continuation loop does the same. The agent inside the `/goal` session has zero special context from the Supergoal invocation; everything it needs is in the files on disk — by design.
 

@@ -3,6 +3,33 @@
 This is the changelog for the **content-skills adaptation** of `supergoal`. For the upstream
 project's history, see https://github.com/robzilla1738/supergoal.
 
+## 0.8.0-win.1
+
+Persists the **Stage 7 `/goal` dispatch line** to `.supergoal/goals/goal_prompt.md`. Previously
+the ready-to-paste `/goal` command was only printed in chat — the one load-bearing artifact of a
+run that wasn't on disk under `$SUPERGOAL_ROOT`, contradicting the skill's "everything the
+executing agent needs is in files on disk" principle. (Stage 0 already created `goals/`; nothing
+wrote to it.)
+
+- **Stage 7** writes `goals/goal_prompt.md` (between phase-spec validation and the chat print): a
+  short header (task title, dispatch date, total phases, baseline ref(s) — one SHA per repo on
+  multi-repo runs), the verbatim `/goal` command in a fenced block (byte-for-byte identical to the
+  chat print), and a one-line resume instruction. The Stage 7 closing instruction now notes the
+  line is also saved there.
+- **Stage 6 revision loop** regenerates `goal_prompt.md` (when it already exists) on any revision
+  that changes phase count, a phase spec, or `ROADMAP.md`, so the persisted condition can never
+  drift from the plan it drives.
+- **Stage 0 resume detection** now triggers on `READY_TO_DISPATCH` *or* `IN_PROGRESS` and points
+  the user at `goals/goal_prompt.md` as the canonical re-dispatch line once the baseline still
+  matches HEAD and pre-flight is green; on baseline drift it re-captures and regenerates the file.
+- Why it matters: deferred dispatch survives context compaction / closed sessions; re-dispatch
+  after BLOCKED uses a verbatim-identical end-state condition (so the evaluator can still clear);
+  a teammate or second machine can dispatch from the checkout alone; post-mortems see the exact
+  condition that drove the run. Staleness is guarded by the header's dispatch date + baseline ref
+  plus the regenerate-on-revision rule.
+- Documentation-only change to the model's Write steps in `SKILL.md` (plus a consistency line in
+  `references/goal-format.md`). No helper-script changes — `.sh`/`.ps1` parity is unaffected.
+
 ## 0.7.0-win.1
 
 Adds a **host-capability layer** so the run adapts to Claude Code vs Codex without changing the
