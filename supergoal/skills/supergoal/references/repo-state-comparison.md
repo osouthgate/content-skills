@@ -15,9 +15,10 @@ run, `git diff <baseline>..HEAD` is **empty**:
 - the cleanliness greps would report "0 debug prints / 0 TODOs / 0 dead imports" no matter what
   was actually written.
 
-The baseline (`Baseline ref:` in `.supergoal/STATE.md`) is captured at Stage 7 dispatch, before
-any phase runs. By completion the working tree — not just `HEAD` — holds the result. So the
-comparison must be **baseline → working tree**, not **baseline → HEAD**.
+The baseline (`Baseline ref:` in the plan's `.supergoal/plans/<slug>/STATE.md`) is captured at
+Stage 7 dispatch as the plan commit, before any phase runs. By completion the working tree — not
+just `HEAD` — holds the result. So the comparison must be **baseline → working tree**, not
+**baseline → HEAD**.
 
 ## The strategy: complete working-tree state vs baseline
 

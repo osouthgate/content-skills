@@ -14,23 +14,24 @@ Key implications:
 
 ## Supergoal's single-`/goal` shape
 
-Supergoal uses **one** `/goal` per run, dispatched by the **user** at the end of Stage 7. Slash commands fire only from user input on both Claude Code and Codex — the planner cannot fire `/goal` from its own message text. Stage 7's job is to write all phase specs to disk, then print a copy-paste-ready `/goal` block. The user pastes once; from there, the run is autonomous.
+Supergoal uses **one** `/goal` per run, dispatched by the **user** at the end of Stage 7. Slash commands fire only from user input on both Claude Code and Codex — the planner cannot fire `/goal` from its own message text. Stage 7's job is to write all phase specs to disk under the plan's folder, persist the dispatch line to `.supergoal/plans/<slug>/goals/goal_prompt.md` (so it survives context compaction, a closed session, or a handoff to another checkout — the chat print is just a convenience copy of that file), then print a copy-paste-ready `/goal` block. The user pastes once; from there, the run is autonomous.
 
-The condition is:
+Per-plan artifacts (ROADMAP, STATE, phases, capabilities) live under `.supergoal/plans/<slug>/`; the shared operating manual `.supergoal/PROTOCOL.md` and the `.supergoal/repo-state.{sh,ps1}` helpers live at the `.supergoal/` root. The condition embeds the concrete plan path (`<slug>` replaced at dispatch):
 
 ```
-Execute all phases of .supergoal/ROADMAP.md in dependency order
-(read .supergoal/capabilities.md; if subagent fan-out is
-available, run each ready set of independent phases in parallel,
-else sequentially). Read .supergoal/phases/phase-N.md for each
-phase; do the work; run mandatory commands; print
-SUPERGOAL_PHASE_VERIFY then SUPERGOAL_PHASE_DONE for each phase;
-follow the failure-recovery protocol in .supergoal/PROTOCOL.md if
-any criterion fails. After the last phase, run the FINAL AUDIT in
-PROTOCOL.md (re-verify against ROADMAP.md; re-run aggregated
+Execute all phases of .supergoal/plans/<slug>/ROADMAP.md in
+dependency order (read .supergoal/plans/<slug>/capabilities.md; if
+subagent fan-out is available, run each ready set of independent
+phases in parallel, else sequentially). Read
+.supergoal/plans/<slug>/phases/phase-N.md for each phase; do the
+work; run mandatory commands; print SUPERGOAL_PHASE_VERIFY then
+SUPERGOAL_PHASE_DONE for each phase; follow the failure-recovery
+protocol in .supergoal/PROTOCOL.md if any criterion fails. After
+the last phase, run the FINAL AUDIT in PROTOCOL.md (re-verify
+against .supergoal/plans/<slug>/ROADMAP.md; re-run aggregated
 mandatory commands; spot-check criteria; on gaps, write
-audit-fix-<round>.md and execute inline). Only after
-AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE.
+.supergoal/plans/<slug>/phases/audit-fix-<round>.md and execute
+inline). Only after AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE.
 
 Done when SUPERGOAL_RUN_COMPLETE appears in the transcript with
 one SUPERGOAL_PHASE_DONE per phase, AUDIT_COMPLETE printed before
@@ -38,7 +39,7 @@ SUPERGOAL_RUN_COMPLETE, and no FAILURE_HANDOFF or AUDIT_HANDOFF
 this run.
 ```
 
-This works on both hosts. There is no per-phase `/goal` dispatch and no inter-session chain — once active, a single `/goal` session reads PROTOCOL.md and `capabilities.md`, drives every phase spec (sequentially on Codex; independent phases in parallel via subagent fan-out on Claude Code — same plan, same per-phase contract either way), runs the final audit, and only completes when the audit is clean. See `claude-capabilities.md` for the capability profile.
+This works on both hosts. There is no per-phase `/goal` dispatch and no inter-session chain — once active, a single `/goal` session reads the shared PROTOCOL.md and the plan's `capabilities.md`, drives every phase spec (sequentially on Codex; independent phases in parallel via subagent fan-out on Claude Code — same plan, same per-phase contract either way), runs the final audit, and only completes when the audit is clean. See `claude-capabilities.md` for the capability profile.
 
 ## Required transcript blocks (Supergoal-specific)
 
@@ -131,7 +132,7 @@ Round: <N>
 Gaps:
 - <gap 1>: <details>
 - <gap 2>: <details>
-Writing fix spec at .supergoal/phases/audit-fix-<N>.md, executing inline.
+Writing fix spec at .supergoal/plans/<slug>/phases/audit-fix-<N>.md, executing inline.
 ```
 
 ### `AUDIT_COMPLETE` (zero gaps — emit before SUPERGOAL_RUN_COMPLETE)
@@ -154,7 +155,7 @@ Round: 3
 Persistent gaps:
 - <gap>
 - ...
-Three audit rounds attempted; fix specs at .supergoal/phases/audit-fix-{1,2,3}.md
+Three audit rounds attempted; fix specs at .supergoal/plans/<slug>/phases/audit-fix-{1,2,3}.md
 Suggested next move: <one line>
 STATE.md updated to BLOCKED.
 ```
@@ -193,7 +194,7 @@ Failed criterion: <text>
 Retry probe history:
   attempt 1: <summary>
   attempt 2: <summary>
-Writing fix spec at .supergoal/phases/phase-<N>.fix.md
+Writing fix spec at .supergoal/plans/<slug>/phases/phase-<N>.fix.md
 ```
 
 ### `FAILURE_HANDOFF` (third failure — stop)

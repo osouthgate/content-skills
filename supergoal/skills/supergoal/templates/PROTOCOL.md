@@ -2,6 +2,10 @@
 
 This file is read by the executing agent at the start of the single `/goal` session and followed throughout. It is the operating manual for the autonomous run.
 
+## Your plan directory
+
+This PROTOCOL and the `repo-state.{sh,ps1}` helpers are **shared** and live at `.supergoal/`. Everything else belongs to **one plan** under `.supergoal/plans/<slug>/` — your plan directory, written `<plan-dir>/` below. The exact path is given in the `/goal` condition that dispatched you (e.g. `.supergoal/plans/2026-06-10-add-user-auth/`). Read `STATE.md`, `ROADMAP.md`, `capabilities.md`, and `phases/` **from that directory**, and write all phase/fix/audit specs back into it. Do not touch other plans' folders.
+
 ## Cross-platform: the comparison helper
 
 The cleanliness and deliverable checks call the `repo-state` helper, which was copied into `.supergoal/` in **both** forms at dispatch. Use the one matching your host shell — they have identical subcommands, arguments, stdout, and exit codes:
@@ -11,9 +15,9 @@ The cleanliness and deliverable checks call the `repo-state` helper, which was c
 
 Detect once (PowerShell defines `$PSVersionTable`; a POSIX shell does not) and reuse. On Windows, replace the line-count pipe `... | wc -l` with `... | Measure-Object -Line` and grep with `Select-String`. Below, the `bash …repo-state.sh` form is canonical; substitute the `.ps1` form on Windows.
 
-## Capability-aware execution (read `.supergoal/capabilities.md` first)
+## Capability-aware execution (read `<plan-dir>/capabilities.md` first)
 
-Before the loop, read `.supergoal/capabilities.md` (written at plan time). It sets two execution choices; both default to the portable path when the capability is absent:
+Before the loop, read `<plan-dir>/capabilities.md` (written at plan time). It sets two execution choices; both default to the portable path when the capability is absent:
 
 - **Phase ordering.** If **subagent fan-out** is available (Claude Code, `Agent`/Task tool present), drive phases in **dependency order with parallel ready-sets**: a "ready set" is every not-yet-done phase whose `Depends on phases:` are all complete. Dispatch the whole ready set as parallel subagents in **one** message, wait for it to finish, mark those phases done in `STATE.md`, then recompute the next ready set. Constraints: only fan out phases whose **deliverables don't overlap** (parallel workers on the same files corrupt each other — serialize or give each a git worktree); the Polish & Harden phase depends on everything, so it always runs last and solo. If fan-out is **absent** (Codex), run strictly sequential by `Current phase: N` — identical plan, single-file drive.
 - **Verification depth.** If `capabilities.md` records an **E2E surface** (web browser driver / mobile simulator / runnable service), behavior-shipping phases must self-verify end-to-end against it (see step 5 / the `E2E:` line). If **none**, unit evidence only — say so, don't fake it.
@@ -24,8 +28,8 @@ Before the loop, read `.supergoal/capabilities.md` (written at plan time). It se
 
 Repeat until `SUPERGOAL_RUN_COMPLETE` is printed. Steps 1–10 describe a **single phase**; on Claude Code with fan-out, run the whole current ready set concurrently (each worker executes steps 1–8 for its phase) and recompute the ready set instead of incrementing `N`. On Codex, `N` advances one at a time.
 
-1. Read `.supergoal/STATE.md`. Find `Current phase: N` (or, with fan-out, the current ready set).
-2. Read `.supergoal/phases/phase-N.md`. This is your full work spec.
+1. Read `<plan-dir>/STATE.md`. Find `Current phase: N` (or, with fan-out, the current ready set).
+2. Read `<plan-dir>/phases/phase-N.md`. This is your full work spec.
 3. Print `SUPERGOAL_PHASE_START` with the spec's metadata (phase number, name, task, mandatory commands, acceptance count, evidence types, dependencies).
 4. Do the work described in the spec. Run mandatory commands. Surface evidence into the transcript (command output last ~10 lines + exit code; file listings; key diff excerpts). When `capabilities.md` records an E2E surface and this phase ships user-facing behavior, **exercise the running thing** (load the app and assert / drive the simulator and screenshot / start the service and hit the endpoint) and surface that evidence too.
 5. Print `SUPERGOAL_PHASE_VERIFY`: each acceptance criterion `pass|fail` with evidence; engineering checks (build/typecheck/lint/tests); an **`E2E:` line** (`<surface> — pass|fail` with evidence, or `none — unit evidence only` when no surface exists); **cleanliness checks** — run `bash .supergoal/repo-state.sh added-lines <Baseline ref>` (the complete set of added/new lines since baseline, **including uncommitted and untracked work**) and grep it for stack-specific debug patterns — `console.log`/`console.error` for JS/TS; `print(`/`pprint(` for Python; `print(`/`dump(` for Swift; `fmt.Println`/`log.Println` for Go; session TODO/FIXME added this phase; dead imports added; files changed count via `bash .supergoal/repo-state.sh changed-files <Baseline ref> | wc -l`; notable diff one-liners. Any non-zero cleanliness count triggers the same 3-strike treatment as a failed criterion unless the phase spec explicitly declares a `Cleanliness override:` line (e.g., a debug-tooling phase legitimately ships logs). The complete-working-tree comparison is documented once in `references/repo-state-comparison.md`.
@@ -42,14 +46,14 @@ Per-phase VERIFY blocks are self-reports. The audit closes that loophole by re-v
 ### Audit steps (one round)
 
 1. Print `AUDIT_START` (round number, total phase count, criteria count, deduplicated mandatory commands to re-run).
-2. Re-read `.supergoal/ROADMAP.md` and pull every phase's acceptance criteria fresh from the original plan.
+2. Re-read `<plan-dir>/ROADMAP.md` and pull every phase's acceptance criteria fresh from the original plan.
 3. **Phase completeness:** scan the transcript for one `SUPERGOAL_PHASE_DONE` per phase 1..N. Any missing = an `AUDIT_GAP`.
 4. **Re-run aggregated mandatory commands** once each (build / typecheck / lint / full test suite — whatever the union of all phases' mandatory commands is, deduplicated). Surface last ~10 lines + exit code. Non-zero exit = an `AUDIT_GAP`.
 5. **Spot-check verifiable acceptance criteria** across all phases:
    - "File X exists" / "Function Y exported" / "Config key Z set" / "No `console.log` in app code" → re-check via `ls`/`grep`/`cat`.
    - "Screenshot showed X" / "Manual smoke test passed" / non-deterministic checks → mark `trust-prior-verify`, don't re-run.
-5b. **Deliverable check** — for each phase block in `.supergoal/ROADMAP.md`, parse the `**Deliverables:**` bullets. For every bullet that names a file path or glob:
-   - Read `Baseline ref:` from `.supergoal/STATE.md`.
+5b. **Deliverable check** — for each phase block in `<plan-dir>/ROADMAP.md`, parse the `**Deliverables:**` bullets. For every bullet that names a file path or glob:
+   - Read `Baseline ref:` from `<plan-dir>/STATE.md`.
    - Run `bash .supergoal/repo-state.sh deliverable <baseline-ref> "<path>"`. It compares the **complete working tree** (committed + staged + unstaged + deleted) against the baseline and detects untracked new files separately, printing `present — <evidence>` (exit 0) or `missing` (exit 1). An invalid/unavailable baseline degrades to a filesystem existence check. Strategy: `references/repo-state-comparison.md`.
    - `missing` (exit 1) → `AUDIT_GAP: phase <N> deliverable "<bullet>" not present in working tree or diff`.
    - This is repository ground truth, not transcript self-report — it catches the "agent said done but didn't ship" case the per-phase VERIFY cannot, even when the run never committed.
@@ -58,7 +62,7 @@ Per-phase VERIFY blocks are self-reports. The audit closes that loophole by re-v
 ### If gaps found
 
 1. Print `AUDIT_GAPS` with the list.
-2. Write `.supergoal/phases/audit-fix-<round>.md` — a focused fix spec that targets only the failing criteria. Forbid scope creep. Use the affected phases' original VERIFY as the success gate.
+2. Write `<plan-dir>/phases/audit-fix-<round>.md` — a focused fix spec that targets only the failing criteria. Forbid scope creep. Use the affected phases' original VERIFY as the success gate.
 3. Execute the fix spec inline (same agent, same `/goal`, same per-criterion 3-strike protocol from regular phases).
 4. On fix success: loop back to step 1 of the audit (round + 1).
 5. On 3rd round's audit failure: print `AUDIT_HANDOFF` (full gap history, suggested next move), update `STATE.md` to `BLOCKED`, stop. Do **not** print `SUPERGOAL_RUN_COMPLETE`.
@@ -74,13 +78,13 @@ Per-phase VERIFY blocks are self-reports. The audit closes that loophole by re-v
 ### First failure of any acceptance criterion
 
 1. Print `FAILURE_PROBE` (phase, failed criterion, what was tried, root-cause hypothesis).
-2. Append the probe to `.supergoal/STATE.md` failure log.
+2. Append the probe to `<plan-dir>/STATE.md` failure log.
 3. **Auto-retry the same phase once.** Inject the probe as a "Previous attempt failed because: …" preamble. Do not advance.
 
 ### Second failure (auto-retry also failed)
 
 1. Print `FAILURE_ESCALATE`.
-2. Write a focused **fix spec** at `.supergoal/phases/phase-N.fix.md`. The fix spec:
+2. Write a focused **fix spec** at `<plan-dir>/phases/phase-N.fix.md`. The fix spec:
    - Targets only the failing criterion.
    - Forbids scope creep ("do not touch unrelated files").
    - Ends with the original phase's VERIFY block as the success gate.

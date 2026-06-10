@@ -1,8 +1,8 @@
-# Phase spec template — write to .supergoal/phases/phase-N.md
+# Phase spec template — write to .supergoal/plans/<slug>/phases/phase-N.md
 #
 # This is a free-form work spec the executing agent reads from disk.
-# No char budget. The agent follows .supergoal/PROTOCOL.md for the
-# execution loop, failure recovery, and memory writeback.
+# No char budget. The agent follows the shared .supergoal/PROTOCOL.md
+# for the execution loop, failure recovery, and memory writeback.
 #
 # Replace {{...}} placeholders. Keep the SUPERGOAL_PHASE_START block
 # verbatim so validate-phase.sh and the runtime can anchor on it.

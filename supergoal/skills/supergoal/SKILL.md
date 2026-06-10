@@ -37,12 +37,12 @@ If a phase can't be measured, it isn't a phase. Rewrite it until it can.
 
 ## How this skill works (one-shot summary)
 
-0. **Available context** — preload memory; detect available tools (Context7, WebSearch, MCPs, skills) **and host capabilities (Claude Code vs Codex: subagent fan-out, end-to-end verification surfaces)**; resume any in-progress Supergoal state
+0. **Available context** — select or mint the plan (`.supergoal/plans/<slug>/`, tracked in the `INDEX.md` signpost) and resume any in-progress one; preload memory; detect available tools (Context7, WebSearch, MCPs, skills) **and host capabilities (Claude Code vs Codex: subagent fan-out, end-to-end verification surfaces)**
 1. **Intake** — restate, classify, ask enough questions to cover every material gap. Greenfield walks the full category checklist (platform, stack, design direction, integrations, scope, audience, perf, data model) in batches of up to 4 until everything material is filled in; brownfield asks 0–2 since recon answers most structural questions.
 2. **Recon** — parallel codebase + environment scan
 3. **Deep think** — research best practices with whatever tools exist (optional, not required); list top-3 risks + dependencies
 4. **Decompose** — derive phase count from the task itself; no fixed cap
-5. **Write phase specs** — one work-spec file per phase under `.supergoal/phases/phase-N.md` (any length, no char budget)
+5. **Write phase specs** — one work-spec file per phase under `$SUPERGOAL_PLAN_DIR/phases/phase-N.md` (any length, no char budget)
 6. **Plan review** — show summary + concrete revision menu; wait for explicit go/no-go
 7. **Hand off one ready-to-paste `/goal`** with a short end-state condition; the user pastes once, and the agent inside that fresh `/goal` session executes phases sequentially with retry + fix-spec recovery + per-phase memory writeback, then runs a **final audit** that re-verifies the work against the original ROADMAP and self-heals any gaps before completion holds
 
@@ -63,7 +63,7 @@ SUPERGOAL_DIR=$(dirname "$(ls -1 \
   2>/dev/null | head -n1)")
 export SUPERGOAL_DIR
 export SUPERGOAL_ROOT="${SUPERGOAL_ROOT:-.supergoal}"
-mkdir -p "$SUPERGOAL_ROOT/goals"
+mkdir -p "$SUPERGOAL_ROOT/plans"
 echo "SUPERGOAL_DIR=$SUPERGOAL_DIR"
 echo "SUPERGOAL_ROOT=$SUPERGOAL_ROOT"
 ```
@@ -78,7 +78,7 @@ $cand = @(
 if (-not $cand) { throw "supergoal: SKILL.md not found under ~\.claude\skills\supergoal or .\.claude\skills\supergoal" }
 $env:SUPERGOAL_DIR = Split-Path -Parent $cand
 if (-not $env:SUPERGOAL_ROOT) { $env:SUPERGOAL_ROOT = '.supergoal' }
-New-Item -ItemType Directory -Force -Path "$env:SUPERGOAL_ROOT\goals" | Out-Null
+New-Item -ItemType Directory -Force -Path "$env:SUPERGOAL_ROOT\plans" | Out-Null
 "SUPERGOAL_DIR=$env:SUPERGOAL_DIR"
 "SUPERGOAL_ROOT=$env:SUPERGOAL_ROOT"
 ```
@@ -87,11 +87,77 @@ New-Item -ItemType Directory -Force -Path "$env:SUPERGOAL_ROOT\goals" | Out-Null
 
 All artifacts live under `$SUPERGOAL_ROOT`. Skill assets (scripts, references, templates) live under `$SUPERGOAL_DIR`.
 
+### One root, many plans — the layout
+
+`$SUPERGOAL_ROOT` holds **shared, plan-agnostic assets** at its top level and **one folder per plan** under `plans/`:
+
+```
+.supergoal/
+  INDEX.md              ← signpost: every plan, its slug, status, baseline (Stage 0 reads this first)
+  PROTOCOL.md           ← shared operating manual (copied at dispatch)
+  repo-state.sh         ← shared helper (copied at dispatch)
+  repo-state.ps1        ← shared helper (copied at dispatch)
+  plans/
+    <slug>/             ← one self-describing plan = $SUPERGOAL_PLAN_DIR
+      ROADMAP.md  STATE.md  THINKING.md  capabilities.md  tools.md
+      context.md  repo-map.md  applied-memories.md  applied-skills.md
+      goals/goal_prompt.md
+      phases/phase-1.md … phase-N.md  (+ phase-N.fix.md / audit-fix-<round>.md as needed)
+```
+
+- **`SUPERGOAL_ROOT`** = `.supergoal` (shared root). **`SUPERGOAL_PLAN`** = the current plan's slug. **`SUPERGOAL_PLAN_DIR`** = `$SUPERGOAL_ROOT/plans/$SUPERGOAL_PLAN` — where **every per-plan artifact** lives. Stage 0 mints the slug (new run) or selects it (resume) and exports `SUPERGOAL_PLAN_DIR`; all later stages write under it.
+- **The slug** is `YYYY-MM-DD-<kebab-task>` (e.g. `2026-06-10-add-user-auth`) — date-prefixed so plans sort chronologically and never collide.
+- **Shared assets** (`INDEX.md`, `PROTOCOL.md`, `repo-state.{sh,ps1}`) stay at `$SUPERGOAL_ROOT` and are referenced by literal path; **only per-plan artifacts** carry the `plans/<slug>/` prefix. The `/goal` condition embeds the concrete plan dir so the executing agent reads the right plan.
+
+> **Concurrency caveat.** Multiple plans can *coexist on disk and be dispatched one at a time*, but two `/goal` loops cannot run in the **same working tree** simultaneously — they'd edit overlapping project files and step on each other. For genuinely parallel plans, give each its own git branch or worktree (one plan each). The `plans/<slug>/` layout is about persistence and selection, not simultaneous execution.
+
+### Persistence — `.supergoal/` is a committed artifact, not scratch
+
+`$SUPERGOAL_ROOT` (default `.supergoal/`) is **meant to be committed to the repo**, not gitignored. The plan (ROADMAP, phase specs, STATE, the persisted `goal_prompt.md` dispatch line, PROTOCOL, helpers) is load-bearing — committing it is what makes a run survive an ephemeral/cloud session, travel with the branch, and be handed off to a teammate or a second machine from the checkout alone. This is the same principle that drove persisting `goal_prompt.md`: everything the executing agent needs is in files on disk, and on disk means in git.
+
+Two consequences worth stating up front:
+
+- **Branch-per-plan is the natural isolation unit.** Because `.supergoal/` is committed, each git branch carries its own plan. Running `/supergoal` on a feature branch keeps that plan separate from one on another branch with zero extra machinery — different branches, different `.supergoal/`. (For multiple plans on the *same* branch, see the `plans/<slug>/` layout and `INDEX.md` signpost above.)
+- **STATE.md is volatile during a run; the plan scaffolding is stable.** The executor rewrites STATE.md every phase, so commit the stable scaffolding at dispatch (Stage 7 does this before capturing the baseline, so the baseline cleanly excludes the plan files) and let STATE churn locally; the final state is committed at completion. On a cloud/ephemeral host, commit **and push** at phase boundaries — un-pushed work is lost on idle (see `capabilities.md`).
+
+If a project's `.gitignore` already excludes `.supergoal/`, say so at Stage 6 and recommend un-ignoring it, or the persistence guarantees above don't hold.
+
 ---
 
 ## Stage 0 — Available context (memory + tools)
 
 Before doing anything else, sense what's available this session. This is what makes the run frictionless — if memory already knows the user's preferences, don't ask; if a tool isn't available, don't try to call it.
+
+### Plan selection (resume or start new)
+
+`$SUPERGOAL_ROOT` can hold several plans under `plans/<slug>/`. Decide which one this invocation operates on **first** — everything below (memory, tools, recon, roadmap) writes under `$SUPERGOAL_PLAN_DIR`, so the plan dir must exist before any of it runs.
+
+1. **Read the signpost.** If `$SUPERGOAL_ROOT/INDEX.md` exists, read it — it lists every plan with slug, title, status, and baseline. Treat each plan's own `plans/<slug>/STATE.md` as authoritative if INDEX looks stale, and reconcile INDEX as you go.
+2. **Resumable plans?** A plan whose STATE shows `READY_TO_DISPATCH`, `IN_PROGRESS`, or `BLOCKED` is resumable. If one or more exist, call `AskUserQuestion` ("Resume an in-progress plan, or start a new one?") listing each resumable plan (slug · title · status) plus a "Start new" option.
+   - **Resume** → set `SUPERGOAL_PLAN` to that slug, export `SUPERGOAL_PLAN_DIR="$SUPERGOAL_ROOT/plans/$SUPERGOAL_PLAN"`, and go straight to **Resume detection** below (re-validate baseline/pre-flight, then point at that plan's `goal_prompt.md`). Skip the memory/tools/recon passes — they already ran for this plan.
+   - **Start new** → mint a slug (step 3).
+3. **Mint a new plan slug** = `YYYY-MM-DD-<kebab-task>` (today's date + a short kebab of the task), create the plan dir, and export the env var:
+
+   **Unix / git-bash:**
+   ```bash
+   SLUG="$(date +%Y-%m-%d)-<kebab-task>"      # e.g. 2026-06-10-add-user-auth
+   export SUPERGOAL_PLAN="$SLUG"
+   export SUPERGOAL_PLAN_DIR="$SUPERGOAL_ROOT/plans/$SLUG"
+   mkdir -p "$SUPERGOAL_PLAN_DIR/phases" "$SUPERGOAL_PLAN_DIR/goals"
+   echo "SUPERGOAL_PLAN_DIR=$SUPERGOAL_PLAN_DIR"
+   ```
+
+   **Windows / PowerShell:**
+   ```powershell
+   $Slug = "$(Get-Date -Format yyyy-MM-dd)-<kebab-task>"
+   $env:SUPERGOAL_PLAN = $Slug
+   $env:SUPERGOAL_PLAN_DIR = "$env:SUPERGOAL_ROOT\plans\$Slug"
+   New-Item -ItemType Directory -Force -Path "$env:SUPERGOAL_PLAN_DIR\phases", "$env:SUPERGOAL_PLAN_DIR\goals" | Out-Null
+   "SUPERGOAL_PLAN_DIR=$env:SUPERGOAL_PLAN_DIR"
+   ```
+4. **Record it in the signpost.** Append (or create) a row in `$SUPERGOAL_ROOT/INDEX.md` for the new slug with status `PLANNING` (template at `$SUPERGOAL_DIR/templates/INDEX.md`). Stages 6 and 7 update this row as the plan advances.
+
+> The same shell-session caveat applies: if env vars don't persist between tool calls, re-derive `SUPERGOAL_PLAN_DIR` or substitute the literal `.supergoal/plans/<slug>/` path in each command.
 
 ### Memory preload
 
@@ -138,7 +204,7 @@ if ($MemDir -and (Test-Path (Join-Path $MemDir 'MEMORY.md'))) {
 
 Read the index. Then **selectively** read individual memory files that look relevant to the task (feedback memories about the stack/domain, user role memories, related project memories). Don't dump them all into context — pull what matters.
 
-Capture applicable memory hits in `$SUPERGOAL_ROOT/applied-memories.md` (one line per memory: name, why-applicable, what-it-changes). Surface them in Stage 1 as "Applied from memory: …" so the user can see what's being inherited and correct anything stale.
+Capture applicable memory hits in `$SUPERGOAL_PLAN_DIR/applied-memories.md` (one line per memory: name, why-applicable, what-it-changes). Surface them in Stage 1 as "Applied from memory: …" so the user can see what's being inherited and correct anything stale. (The MEM_DIR itself is shared across plans — only the *applied*-memories record is per-plan.)
 
 ### Tool discovery
 
@@ -146,16 +212,16 @@ Tools differ between sessions and hosts (Claude Code vs Codex, different MCP ser
 
 - **Context7** — available if `mcp__claude_ai_Context7__resolve-library-id` or similar is in the tool list. If absent, skip it; rely on training-cutoff knowledge + WebSearch if that's present.
 - **WebSearch / WebFetch** — available if listed. If neither, skip web research.
-- **Project skills** — check the available-skills list for domain-relevant skills (e.g. `mobile-ios-design`, `clerk-auth`, `expo-dev-client`) and note them in `$SUPERGOAL_ROOT/applied-skills.md` to invoke from inside phase goals if relevant.
-- **Prior Supergoal state** — if `$SUPERGOAL_ROOT/STATE.md` exists from a previous run, read it; resume rather than restart.
+- **Project skills** — check the available-skills list for domain-relevant skills (e.g. `mobile-ios-design`, `clerk-auth`, `expo-dev-client`) and note them in `$SUPERGOAL_PLAN_DIR/applied-skills.md` to invoke from inside phase goals if relevant.
+- **Prior Supergoal state** — already handled by **Plan selection** above (the `INDEX.md` signpost + per-plan `STATE.md`); resume rather than restart.
 
-Write detected tools to `$SUPERGOAL_ROOT/tools.md`. Stage 3 and the phase goals reference this file when deciding what to invoke.
+Write detected tools to `$SUPERGOAL_PLAN_DIR/tools.md`. Stage 3 and the phase goals reference this file when deciding what to invoke.
 
 ### Host & capability detection
 
 The plan Supergoal produces is host-agnostic, but Claude Code and Codex have different **execution** capabilities — and a run that ignores the difference leaves Claude's strengths unused. Detect the capability profile once here and record it; later stages read it to decide *how* phases are driven, never *what the plan is*.
 
-Inspect the tool list and environment (don't guess) and write `$SUPERGOAL_ROOT/capabilities.md`, one line per field (`field: <value> — <signal>`):
+Inspect the tool list and environment (don't guess) and write `$SUPERGOAL_PLAN_DIR/capabilities.md`, one line per field (`field: <value> — <signal>`):
 
 - **Host** — `Agent`/Task tool + `AskUserQuestion` + a skills list ⇒ **Claude Code**; otherwise **Codex**.
 - **Subagent fan-out** — `Agent`/Task tool present ⇒ independent phases can run in parallel (Stage 4 / phase loop). Absent ⇒ sequential single-session execution (the portable default).
@@ -166,7 +232,10 @@ Inspect the tool list and environment (don't guess) and write `$SUPERGOAL_ROOT/c
 
 ### Resume detection
 
-If `STATE.md` exists and shows `Status: IN_PROGRESS` with a phase pending, **do not re-plan**. Print a one-line "Resuming Supergoal from phase N" and jump straight to Stage 6 (plan review) with the existing artifacts, or directly to Stage 7 (dispatch) if the user confirms resume.
+Reached from **Plan selection** when the user chooses to resume a plan (its `SUPERGOAL_PLAN_DIR` is now set). The plan's `$SUPERGOAL_PLAN_DIR/STATE.md` shows `Status: READY_TO_DISPATCH`, `IN_PROGRESS`, or `BLOCKED`, so **do not re-plan** — a previous run already produced the plan, and at `READY_TO_DISPATCH` or beyond it also persisted the dispatch line at `$SUPERGOAL_PLAN_DIR/goals/goal_prompt.md`. Print a one-line "Resuming Supergoal `<slug>` from phase N", then re-validate before re-issuing:
+
+- **Baseline still matches** (the plan's `Baseline ref:` equals `git rev-parse HEAD`) **and pre-flight (Stage 6.5) still green** → point the user straight at **`$SUPERGOAL_PLAN_DIR/goals/goal_prompt.md`** as the canonical re-dispatch line. Its `/goal` command is verbatim-identical to the end-state condition the original run committed to, so re-pasting from this file is what guarantees the host evaluator can still clear — a line reconstructed from memory may differ and never resolve.
+- **Baseline drifted** (work landed since) **or pre-flight now red** → re-capture the baseline and re-run pre-flight, then fall through to Stage 6 (plan review) / Stage 7, which **regenerates** `goal_prompt.md` with the fresh baseline before handing it back.
 
 ---
 
@@ -236,32 +305,32 @@ Most well-described brownfield tasks ask **zero questions**.
 
 ## Stage 2 — Recon (parallel)
 
-Run recon scripts in parallel. They populate context files under `$SUPERGOAL_ROOT/`.
+Run recon scripts in parallel. They populate context files under `$SUPERGOAL_PLAN_DIR/`.
 
 ### Brownfield path
 
 ```bash
 # Unix / git-bash
-bash "$SUPERGOAL_DIR/scripts/detect-stack.sh"   > "$SUPERGOAL_ROOT/context.md"
-bash "$SUPERGOAL_DIR/scripts/summarize-repo.sh" > "$SUPERGOAL_ROOT/repo-map.md"
+bash "$SUPERGOAL_DIR/scripts/detect-stack.sh"   > "$SUPERGOAL_PLAN_DIR/context.md"
+bash "$SUPERGOAL_DIR/scripts/summarize-repo.sh" > "$SUPERGOAL_PLAN_DIR/repo-map.md"
 ```
 
 ```powershell
 # Windows / PowerShell
-pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\detect-stack.ps1"   > "$env:SUPERGOAL_ROOT\context.md"
-pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\summarize-repo.ps1" > "$env:SUPERGOAL_ROOT\repo-map.md"
+pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\detect-stack.ps1"   > "$env:SUPERGOAL_PLAN_DIR\context.md"
+pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\summarize-repo.ps1" > "$env:SUPERGOAL_PLAN_DIR\repo-map.md"
 ```
 
 ### Greenfield path
 
 ```bash
 # Unix / git-bash
-bash "$SUPERGOAL_DIR/scripts/detect-env.sh" > "$SUPERGOAL_ROOT/context.md"
+bash "$SUPERGOAL_DIR/scripts/detect-env.sh" > "$SUPERGOAL_PLAN_DIR/context.md"
 ```
 
 ```powershell
 # Windows / PowerShell
-pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\detect-env.ps1" > "$env:SUPERGOAL_ROOT\context.md"
+pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\detect-env.ps1" > "$env:SUPERGOAL_PLAN_DIR\context.md"
 ```
 
 Read the outputs. Then print a **5-line summary** to the user: stack, package manager, build/test/lint commands, notable modules (if any), risky areas. This is what tells them you've actually understood their codebase before planning.
@@ -275,14 +344,14 @@ This is the difference between a generic plan and a Supergoal. Spend real cycles
 **Required regardless of tools:**
 - Identify the **top 3 risks**: what's most likely to go wrong, what's hardest to undo, what's easy to miss until shipped.
 - Identify **non-obvious dependencies**: things that have to happen in a specific order or block other work.
-- Apply memory hits from `$SUPERGOAL_ROOT/applied-memories.md` — bake them into goals, constraints, or risk mitigations.
+- Apply memory hits from `$SUPERGOAL_PLAN_DIR/applied-memories.md` — bake them into goals, constraints, or risk mitigations.
 
-**Optional, use if available** (check `$SUPERGOAL_ROOT/tools.md`):
+**Optional, use if available** (check `$SUPERGOAL_PLAN_DIR/tools.md`):
 - **Context7** — if available, query current docs for any third-party SDK touched. Don't plan against stale APIs. If unavailable, lean on training-cutoff knowledge and call it out as an assumption ("planned against my training-cutoff understanding of Expo SDK — verify in phase 1").
 - **WebSearch** — if available, look up current consensus on patterns you're unsure about (auth flows, payment idempotency, accessibility standards). If unavailable, skip.
-- **Project skills** — if relevant skills are listed in `$SUPERGOAL_ROOT/applied-skills.md` (e.g. `clerk-auth`, `mobile-ios-design`), note them in THINKING.md as "consult `<skill>` skill during phase N" so the executor invokes them at the right moment.
+- **Project skills** — if relevant skills are listed in `$SUPERGOAL_PLAN_DIR/applied-skills.md` (e.g. `clerk-auth`, `mobile-ios-design`), note them in THINKING.md as "consult `<skill>` skill during phase N" so the executor invokes them at the right moment.
 
-**Write `$SUPERGOAL_ROOT/THINKING.md`** with sections: Goals, Constraints, Risks, Dependencies, Open Questions (already-assumed), Memory hits applied, Tools/skills relied on, Best Practices Applied. Keep it tight — 1–2 pages. This is the substrate the roadmap derives from.
+**Write `$SUPERGOAL_PLAN_DIR/THINKING.md`** with sections: Goals, Constraints, Risks, Dependencies, Open Questions (already-assumed), Memory hits applied, Tools/skills relied on, Best Practices Applied. Keep it tight — 1–2 pages. This is the substrate the roadmap derives from.
 
 See `references/planning-depth.md` for the bar to clear here.
 
@@ -313,11 +382,13 @@ Each phase has:
 
 ## Stage 5 — Write the roadmap and phase specs
 
-Three files, all under `$SUPERGOAL_ROOT/`:
+Three files, all under `$SUPERGOAL_PLAN_DIR/` (this plan's folder):
 
 1. **`ROADMAP.md`** — the plan (template at `$SUPERGOAL_DIR/templates/ROADMAP.md`).
 2. **`STATE.md`** — live progress file the executor updates per phase (template at `$SUPERGOAL_DIR/templates/STATE.md`).
 3. **`phases/phase-N.md`** — one work-spec file per phase (template at `$SUPERGOAL_DIR/templates/phase-goal.txt`, renamed conceptually to "phase spec"). **Any length** — these are read from disk by the executor, not passed to `/goal`, so no char budget.
+
+Also refresh the plan's row in `$SUPERGOAL_ROOT/INDEX.md` (title, total phases, status `PLANNING`) so the signpost reflects the freshly written plan.
 
 Each phase spec must include these markers so the agent and evaluator both have stable anchors:
 
@@ -336,8 +407,8 @@ Depends on phases: <list or "none">
 ```
 
 Validate each spec — it confirms the required markers exist. No char budget.
-- Unix / git-bash: `bash "$SUPERGOAL_DIR/scripts/validate-phase.sh" .supergoal/phases/phase-N.md`
-- Windows / PowerShell: `pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\validate-phase.ps1" .supergoal\phases\phase-N.md`
+- Unix / git-bash: `bash "$SUPERGOAL_DIR/scripts/validate-phase.sh" "$SUPERGOAL_PLAN_DIR/phases/phase-N.md"`
+- Windows / PowerShell: `pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\validate-phase.ps1" "$env:SUPERGOAL_PLAN_DIR\phases\phase-N.md"`
 
 ---
 
@@ -396,10 +467,11 @@ Self-critique:
   - <finding 3 (optional)>
   (criteria rewrites applied in-place if any were flagged)
 
-Artifacts:
-  Roadmap: .supergoal/ROADMAP.md
-  Progress: .supergoal/STATE.md (auto-updates)
-  Phase specs: .supergoal/phases/phase-1..N.md
+Artifacts (plan: <slug>):
+  Roadmap: .supergoal/plans/<slug>/ROADMAP.md
+  Progress: .supergoal/plans/<slug>/STATE.md (auto-updates)
+  Phase specs: .supergoal/plans/<slug>/phases/phase-1..N.md
+  Signpost: .supergoal/INDEX.md
 
 Once you confirm, I'll print a ready-to-paste `/goal` line. Paste it
 once and the chain runs through to completion, with auto-retry and
@@ -413,7 +485,11 @@ Then call `AskUserQuestion` with one question, header "Start chain?", offering *
 - **Tweak a phase** — change criteria, scope, or commands for a specific phase
 - **Restructure phases** — merge, split, add, or remove a phase
 
-Keep options at 4 max. If the user picks any revision option, follow up with a second `AskUserQuestion` to pin down exactly what (e.g., "Which assumption?" with the assumptions listed). Apply the change, update ROADMAP/THINKING/STATE and the affected phase specs, re-run `validate-phase.sh` on each touched spec, then re-show the Stage 6 summary and ask again. Loop until "Start now" or user aborts.
+Keep options at 4 max. If the user picks any revision option, follow up with a second `AskUserQuestion` to pin down exactly what (e.g., "Which assumption?" with the assumptions listed). Apply the change, update ROADMAP/THINKING/STATE and the affected phase specs (all under `$SUPERGOAL_PLAN_DIR/`), re-run `validate-phase.sh` on each touched spec, refresh the plan's `INDEX.md` row if the title or phase count changed, then re-show the Stage 6 summary and ask again. Loop until "Start now" or user aborts.
+
+**If a revision changes the phase count, any phase spec, or `ROADMAP.md`, and `$SUPERGOAL_PLAN_DIR/goals/goal_prompt.md` already exists** (a prior dispatch is being resumed and re-edited), **regenerate `goal_prompt.md` from the revised plan in the same step** — header and verbatim `/goal` command both. The persisted dispatch condition must never drift from the plan it drives; a stale paste line pointing at an obsolete phase set is exactly the failure this file is meant to prevent.
+
+If the project's `.gitignore` excludes `.supergoal/`, flag it here and recommend un-ignoring it — otherwise the plan won't persist to git and the handoff/resume guarantees don't hold.
 
 **Wait for the answer.** Do not dispatch `/goal` until the user picks "Start now". Never assume confirmation; never start the chain on silence.
 
@@ -425,14 +501,14 @@ After Stage 6 returns "Start now" and **before** printing the `/goal` block, run
 
 **Procedure:**
 
-1. Read every `phase-N.md` spec and union their `Mandatory commands:` lines into a deduplicated set.
+1. Read every `$SUPERGOAL_PLAN_DIR/phases/phase-N.md` spec and union their `Mandatory commands:` lines into a deduplicated set.
 2. Run each once. Capture exit code and last ~5 lines.
 3. **If all green:**
-   - Append a `Notable events` line to `.supergoal/STATE.md`: `<DATE> — Pre-flight green: <N> commands clean.`
+   - Append a `Notable events` line to `$SUPERGOAL_PLAN_DIR/STATE.md`: `<DATE> — Pre-flight green: <N> commands clean.`
    - Print `PREFLIGHT_GREEN` with the per-command summary.
    - Proceed to Stage 7.
 4. **If any red:**
-   - Append `<DATE> — Pre-flight red: <cmd> exited <code>.` to `STATE.md`.
+   - Append `<DATE> — Pre-flight red: <cmd> exited <code>.` to the plan's `STATE.md`.
    - Print `PREFLIGHT_RED` with the failing command, exit code, last ~5 lines.
    - Re-show the Stage 6 summary with the failures surfaced and a revised menu (still 4 options to stay under the `AskUserQuestion` ceiling): **"Skip pre-flight, dispatch anyway"** (replaces "Start now" — the user might know the baseline is intentionally broken, e.g., phase 1's whole job is to fix it) / **"Adjust an assumption"** / **"Tweak a phase"** / **"Restructure phases"**. If "Skip pre-flight, dispatch anyway" → log `<DATE> — Pre-flight bypassed by user.` and proceed to Stage 7. Any other choice loops back through the normal Stage 6 revision flow; after the user finishes revising, Stage 6.5 re-runs.
 
@@ -444,24 +520,35 @@ After Stage 6 returns "Start now" and **before** printing the `/goal` block, run
 
 Slash commands on both Claude Code and Codex fire **only from user input** — agent message text is never parsed as a command. So Stage 7 is not an automatic dispatch; it's an honest one-paste handoff. After explicit "Start now" in Stage 6:
 
-1. Update `STATE.md`: `Status: READY_TO_DISPATCH`, `Current phase: 1`, and **capture the baseline ref** — set `Baseline ref:` to the output of `git rev-parse HEAD 2>/dev/null || echo "no-git"`. The audit reads this to diff deliverables against the working tree.
-2. Copy `$SUPERGOAL_DIR/templates/PROTOCOL.md` to `.supergoal/PROTOCOL.md` (the operating manual the executing agent reads at the start of the `/goal` session), and copy **both** comparison helpers — `$SUPERGOAL_DIR/scripts/repo-state.sh` **and** `$SUPERGOAL_DIR/scripts/repo-state.ps1` — into `.supergoal/` (the complete-working-tree comparison helper the cleanliness + deliverable checks invoke; the executor picks the form matching its host. Strategy in `references/repo-state-comparison.md`). Copy both so the `/goal` session works regardless of host shell.
-3. Verify each `.supergoal/phases/phase-N.md` exists; validate each:
-   - Unix / git-bash: `bash "$SUPERGOAL_DIR/scripts/validate-phase.sh" .supergoal/phases/phase-<N>.md`
-   - Windows / PowerShell: `pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\validate-phase.ps1" .supergoal\phases\phase-<N>.md`
-4. Print a fenced code block with the **ready-to-paste `/goal` command** — the condition below is short, instructional but measurable, and well under the 4000-char `/goal` argument limit:
+1. Update the plan's `$SUPERGOAL_PLAN_DIR/STATE.md`: `Status: READY_TO_DISPATCH`, `Current phase: 1`. (The baseline ref is captured in step 4, after the plan is committed.) Set the plan's `INDEX.md` row to `READY_TO_DISPATCH` too.
+2. Copy `$SUPERGOAL_DIR/templates/PROTOCOL.md` to `.supergoal/PROTOCOL.md` (shared operating manual the executing agent reads at the start of the `/goal` session), and copy **both** comparison helpers — `$SUPERGOAL_DIR/scripts/repo-state.sh` **and** `$SUPERGOAL_DIR/scripts/repo-state.ps1` — into `.supergoal/` (the complete-working-tree comparison helper the cleanliness + deliverable checks invoke; the executor picks the form matching its host. Strategy in `references/repo-state-comparison.md`). These three are **shared across plans** and live at `.supergoal/` root, not in the plan folder; copy both helper forms so the `/goal` session works regardless of host shell.
+3. Verify each `$SUPERGOAL_PLAN_DIR/phases/phase-N.md` exists; validate each:
+   - Unix / git-bash: `bash "$SUPERGOAL_DIR/scripts/validate-phase.sh" "$SUPERGOAL_PLAN_DIR/phases/phase-<N>.md"`
+   - Windows / PowerShell: `pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\validate-phase.ps1" "$env:SUPERGOAL_PLAN_DIR\phases\phase-<N>.md"`
+4. **Commit the plan, then capture the baseline as that commit.** The plan is a durable, committable artifact (see "Persistence" above), so commit it before the autonomous run starts mutating the working tree — this is what makes a deferred dispatch survive an ephemeral session and lets a teammate dispatch from the checkout:
+   - Unix / git-bash: `git add .supergoal && git commit -m "supergoal: plan for <task title>" 2>/dev/null || true`
+   - Windows / PowerShell: `git add .supergoal; git commit -m "supergoal: plan for <task title>"` (ignore the error if there's nothing to commit or no git)
+
+   `git add .supergoal` captures the whole root — this plan's folder, the `INDEX.md` signpost, and the shared PROTOCOL/helpers — in one commit. Then **capture the baseline ref** — set the plan's `$SUPERGOAL_PLAN_DIR/STATE.md` `Baseline ref:` to `git rev-parse HEAD 2>/dev/null || echo "no-git"`, which now points at **this plan commit**. Capturing the baseline *as the plan commit* is deliberate: right after dispatch `HEAD == Baseline ref`, so Stage 0's resume staleness guard reads "nothing has happened since dispatch"; once the run commits real work, HEAD moves past the baseline and the guard correctly reports progress. The audit reads this ref to diff deliverables against the working tree. (No git → `no-git`; deliverable/cleanliness checks degrade to filesystem existence — see `references/repo-state-comparison.md`.)
+5. **Persist the dispatch line to disk.** Write `$SUPERGOAL_PLAN_DIR/goals/goal_prompt.md` — the trigger that binds ROADMAP/STATE/phases/PROTOCOL together is otherwise the one load-bearing artifact of a Supergoal run that lives only in chat scrollback. Persisting it means a deferred dispatch survives context compaction and closed sessions, a re-dispatch after BLOCKED/interruption uses a verbatim-identical end-state condition (reconstruction from memory risks a condition the evaluator never clears), and a teammate or second machine can dispatch from the repo checkout alone. The file contains, in order:
+   - **A short header** — task title, dispatch date, total phase count, and the baseline ref(s) captured in step 4. A multi-repo run records one SHA per repo, one line each. (The dispatch date + baseline ref are the staleness guard: they make a stale paste detectable against `git rev-parse HEAD`.)
+   - **The exact `/goal` command, verbatim, in a fenced block** — byte-for-byte identical to what step 6 prints in chat (same command string; do not reword or re-wrap it). This file is the canonical copy; the chat print is the convenience copy.
+   - **One line of instructions**, exactly: "Paste the `/goal` line into your input to dispatch. If significant time has passed or the baseline ref no longer matches HEAD, re-run `/supergoal` to resume — it will re-capture the baseline and re-run pre-flight before re-issuing this file."
+
+   `goal_prompt.md` and the `Baseline ref:` line from step 4 are the only plan files that postdate the commit; they ride along in the run's first commit. On a cloud/ephemeral host, commit + push them now so the dispatch line is durable before the run starts.
+6. Print a fenced code block with the **ready-to-paste `/goal` command** — identical to the one just written to `goal_prompt.md`, with `<slug>` replaced by this plan's actual slug so every per-plan path is concrete. The shared `.supergoal/PROTOCOL.md` stays at root. The condition below is short, instructional but measurable, and well under the 4000-char `/goal` argument limit:
 
 ````
 ```
-/goal "Execute all phases of .supergoal/ROADMAP.md in dependency order (read .supergoal/capabilities.md; if subagent fan-out is available, run each ready set of independent phases in parallel, else sequentially). Read .supergoal/phases/phase-N.md for each phase; do the work; run mandatory commands; print SUPERGOAL_PHASE_VERIFY then SUPERGOAL_PHASE_DONE for each phase; follow the failure-recovery protocol in .supergoal/PROTOCOL.md if any criterion fails. After the last phase, run the FINAL AUDIT in PROTOCOL.md (re-verify against ROADMAP.md; re-run aggregated mandatory commands; spot-check criteria; on gaps, write audit-fix-<round>.md and execute inline). Only after AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE. Done when SUPERGOAL_RUN_COMPLETE appears in the transcript with one SUPERGOAL_PHASE_DONE per phase, AUDIT_COMPLETE printed before SUPERGOAL_RUN_COMPLETE, and no FAILURE_HANDOFF or AUDIT_HANDOFF this run."
+/goal "Execute all phases of .supergoal/plans/<slug>/ROADMAP.md in dependency order (read .supergoal/plans/<slug>/capabilities.md; if subagent fan-out is available, run each ready set of independent phases in parallel, else sequentially). Read .supergoal/plans/<slug>/phases/phase-N.md for each phase; do the work; run mandatory commands; print SUPERGOAL_PHASE_VERIFY then SUPERGOAL_PHASE_DONE for each phase; follow the failure-recovery protocol in .supergoal/PROTOCOL.md if any criterion fails. After the last phase, run the FINAL AUDIT in PROTOCOL.md (re-verify against .supergoal/plans/<slug>/ROADMAP.md; re-run aggregated mandatory commands; spot-check criteria; on gaps, write .supergoal/plans/<slug>/phases/audit-fix-<round>.md and execute inline). Only after AUDIT_COMPLETE, print SUPERGOAL_RUN_COMPLETE. Done when SUPERGOAL_RUN_COMPLETE appears in the transcript with one SUPERGOAL_PHASE_DONE per phase, AUDIT_COMPLETE printed before SUPERGOAL_RUN_COMPLETE, and no FAILURE_HANDOFF or AUDIT_HANDOFF this run."
 ```
 ````
 
-5. Follow the fenced block with **exactly this one-line instruction**:
+7. Follow the fenced block with **exactly this one-line instruction**:
 
-> **Paste the `/goal` line above into your input to dispatch the chain.** From there it runs autonomously — auto-retry, fix-spec recovery, per-phase memory writeback — until `SUPERGOAL_RUN_COMPLETE` appears.
+> **Paste the `/goal` line above into your input to dispatch the chain.** It's also saved at `.supergoal/plans/<slug>/goals/goal_prompt.md`, so you can dispatch later or from another checkout even if this session closes. From there it runs autonomously — auto-retry, fix-spec recovery, per-phase memory writeback — until `SUPERGOAL_RUN_COMPLETE` appears.
 
-6. **Stop.** Do not generate any further output. The Supergoal invocation ends here. The user's paste begins the autonomous run under a fresh `/goal` session, which reads `PROTOCOL.md`, `ROADMAP.md`, `STATE.md`, and the phase specs from disk and runs the loop documented in the next sections.
+8. **Stop.** Do not generate any further output. The Supergoal invocation ends here. The user's paste begins the autonomous run under a fresh `/goal` session, which reads the shared `.supergoal/PROTOCOL.md` and the plan's `ROADMAP.md`, `STATE.md`, and phase specs (all under `.supergoal/plans/<slug>/`) from disk and runs the loop documented in the next sections.
 
 Once `/goal` is active (you'll see the `◎ /goal active` indicator on Claude Code), the per-turn evaluator keeps the agent working until the end-state condition holds. On Codex, the auto-continuation loop does the same. The agent inside the `/goal` session has zero special context from the Supergoal invocation; everything it needs is in the files on disk — by design.
 
@@ -469,15 +556,17 @@ Once `/goal` is active (you'll see the `◎ /goal active` indicator on Claude Co
 
 ## Phase execution loop (inside the single `/goal` session)
 
+All per-plan paths below live under the **plan dir named in the `/goal` condition** — `.supergoal/plans/<slug>/` (shown as `<plan-dir>/` for brevity). The shared `.supergoal/PROTOCOL.md` and `.supergoal/repo-state.{sh,ps1}` stay at root.
+
 The agent's loop, repeated until `SUPERGOAL_RUN_COMPLETE`:
 
-1. Read `STATE.md` → find current phase N.
-2. Read `.supergoal/phases/phase-N.md` → full work spec.
+1. Read `<plan-dir>/STATE.md` → find current phase N.
+2. Read `<plan-dir>/phases/phase-N.md` → full work spec.
 3. Print `SUPERGOAL_PHASE_START` block with values from the spec.
 4. Do the work; run mandatory commands; surface evidence into the transcript.
 5. Print `SUPERGOAL_PHASE_VERIFY` block (every criterion `pass|fail` + engineering checks + **cleanliness checks** — get the complete added/new lines since baseline, **including uncommitted and untracked work**, with `bash .supergoal/repo-state.sh added-lines <Baseline ref>` on Unix or `pwsh -NoProfile -File .supergoal/repo-state.ps1 added-lines <Baseline ref>` on Windows, then grep/`Select-String` for stack-specific debug prints, session TODO/FIXME, dead imports; non-zero counts trigger 3-strike unless the phase spec declares `Cleanliness override:`).
 6. **Memory writeback check** — anything non-obvious learned? If yes, write a memory file under the detected MEM_DIR; print `MEMORY_SAVED: <name>` (or `MEMORY_SAVED: none`).
-7. Print `SUPERGOAL_PHASE_DONE`, update `STATE.md` (mark phase N complete, set Current phase = N+1, append events line).
+7. Print `SUPERGOAL_PHASE_DONE`, update `<plan-dir>/STATE.md` (mark phase N complete, set Current phase = N+1, append events line).
 8. **User-interrupt check** — if a new user message has arrived since the last turn, pause and address it before continuing.
 9. If N < total: loop to step 1 for phase N+1.
 10. If N == total: do **not** print `SUPERGOAL_RUN_COMPLETE` yet. Run the **Final audit** (next section). Only after `AUDIT_COMPLETE`, print `SUPERGOAL_RUN_COMPLETE` with a 5-line summary. The `/goal` condition is now satisfied and clears.
@@ -491,13 +580,13 @@ The audit runs once after the final phase. If it finds gaps, it writes a focused
 **Audit steps:**
 
 1. Print `AUDIT_START` with round number, total phase count, criteria count, and the deduplicated set of mandatory commands to re-run.
-2. **Re-read `ROADMAP.md`** — pull every phase's acceptance criteria fresh from the original plan. Do not trust prior VERIFY summaries.
+2. **Re-read `<plan-dir>/ROADMAP.md`** — pull every phase's acceptance criteria fresh from the original plan. Do not trust prior VERIFY summaries.
 3. **Phase completeness check** — scan the transcript: does every phase 1..N have a `SUPERGOAL_PHASE_DONE` block? Surface any missing.
 4. **Re-run aggregated mandatory commands** once each (build, typecheck, lint, full test suite). Surface last ~10 lines + exit code for each. Any non-zero exit → an `AUDIT_GAP`.
 5. **Spot-check verifiable criteria** — for each acceptance criterion across all phases:
    - "File X exists" / "Function Y exported" / "Config key Z set" / "No `console.log` in app code" → re-check via `ls`/`grep`/`cat`.
    - "Screenshot showed X" / "Manual smoke test passed" / other non-deterministic checks → mark `trust-prior-verify`, do not re-run.
-5b. **Deliverable check** — for each phase block in `ROADMAP.md`, parse the `**Deliverables:**` bullets. For each bullet that names a file path or glob, run the comparison helper for the host — `bash .supergoal/repo-state.sh deliverable <Baseline ref> "<path>"` on Unix, or `pwsh -NoProfile -File .supergoal/repo-state.ps1 deliverable <Baseline ref> "<path>"` on Windows. It checks the **complete working tree** (committed + staged + unstaged + deleted) against the baseline and detects untracked new files separately. `missing` (exit 1) → `AUDIT_GAP: phase <N> deliverable "<bullet>" not present`. Repository ground-truth — catches "agent said done but didn't ship," even when the run never committed. Strategy: `references/repo-state-comparison.md`.
+5b. **Deliverable check** — for each phase block in `<plan-dir>/ROADMAP.md`, parse the `**Deliverables:**` bullets. For each bullet that names a file path or glob, run the comparison helper for the host — `bash .supergoal/repo-state.sh deliverable <Baseline ref> "<path>"` on Unix, or `pwsh -NoProfile -File .supergoal/repo-state.ps1 deliverable <Baseline ref> "<path>"` on Windows. It checks the **complete working tree** (committed + staged + unstaged + deleted) against the baseline and detects untracked new files separately. `missing` (exit 1) → `AUDIT_GAP: phase <N> deliverable "<bullet>" not present`. Repository ground-truth — catches "agent said done but didn't ship," even when the run never committed. Strategy: `references/repo-state-comparison.md`.
 6. Print `AUDIT_VERIFY` block:
    - Per-phase status (DONE present or missing)
    - Each mandatory command's exit code
@@ -505,12 +594,13 @@ The audit runs once after the final phase. If it finds gaps, it writes a focused
    - `Deliverables:` block from step 5b — `phase N / "<bullet>": present | missing`
 7. **If any gaps:**
    - Print `AUDIT_GAPS` with the list.
-   - Write `.supergoal/phases/audit-fix-<round>.md` — a focused fix spec targeting **only** the failing criteria, with the original phase's VERIFY as the success gate, scope creep forbidden.
+   - Write `<plan-dir>/phases/audit-fix-<round>.md` — a focused fix spec targeting **only** the failing criteria, with the original phase's VERIFY as the success gate, scope creep forbidden.
    - Execute the fix spec inline (same agent, same `/goal`, same 3-strike per-criterion protocol from regular phases).
-   - On fix success: loop back to step 1 (round + 1). On 3rd round's failure: print `AUDIT_HANDOFF` (full gap history + suggested next move), update `STATE.md` to `BLOCKED`, stop. Do not print `SUPERGOAL_RUN_COMPLETE`.
+   - On fix success: loop back to step 1 (round + 1). On 3rd round's failure: print `AUDIT_HANDOFF` (full gap history + suggested next move), update `<plan-dir>/STATE.md` to `BLOCKED` (and its `INDEX.md` row), stop. Do not print `SUPERGOAL_RUN_COMPLETE`.
 8. **If clean:**
    - Compute `audit coverage` = `re_verified / (re_verified + trust_prior)` as a percentage (where `re_verified` = criteria with `pass` + deliverables marked `present`; `trust_prior` = criteria marked `trust-prior-verify`).
    - Print `AUDIT_COMPLETE` with phases verified, commands re-run clean, criteria pass/trust-prior counts, deliverables present/missing counts, and the audit coverage %.
+   - Set `<plan-dir>/STATE.md` to `Status: COMPLETE` and mark the plan `COMPLETE` in `.supergoal/INDEX.md` so the signpost no longer lists it as resumable.
    - Print `SUPERGOAL_RUN_COMPLETE`. If `trust_prior / (re_verified + trust_prior)` > 30%, prepend an honesty banner: `⚠ Audit coverage: X re-verified, Y trust-prior (Z%). Eyeball UI/UX before merging.` Below 30%, print the plain coverage line without the warning prefix.
 
 The audit is the difference between "every phase passed its own self-report" and "the final state matches the plan I originally approved." That is the bar.
@@ -519,17 +609,17 @@ The audit is the difference between "every phase passed its own self-report" and
 
 **First failure of any criterion:**
 1. Print `FAILURE_PROBE` (what failed, what tried, root-cause hypothesis).
-2. Append probe to `STATE.md` failure log.
+2. Append probe to `<plan-dir>/STATE.md` failure log.
 3. **Auto-retry the same phase once** with the probe injected as feedback. Do not advance.
 
 **Second failure (auto-retry also failed):**
 1. Print `FAILURE_ESCALATE`.
-2. Write a focused **fix spec** at `.supergoal/phases/phase-N.fix.md` (targets only the failing criterion, no scope creep).
+2. Write a focused **fix spec** at `<plan-dir>/phases/phase-N.fix.md` (targets only the failing criterion, no scope creep).
 3. Execute the fix spec inline (same agent, same `/goal` — no new dispatch). On success, re-run the original phase's VERIFY block; on pass, advance to N+1.
 
 **Third failure (fix spec also failed):**
 1. Print `FAILURE_HANDOFF` with: failing criterion, full probe history, three things tried, suggested next move.
-2. Update `STATE.md`: `Status: BLOCKED`. The user takes the wheel.
+2. Update `<plan-dir>/STATE.md`: `Status: BLOCKED` (and its `INDEX.md` row). The user takes the wheel.
 3. The `/goal` condition will not be satisfied; the host's evaluator will keep evaluating but the agent should stop attempting and surface the handoff clearly.
 
 This recovers from flaky envs, simple typos, and missed deps automatically. Only real blockers escalate.
@@ -567,6 +657,7 @@ Write the memory file under the detected MEM_DIR using the standard `name` / `de
 - **Adapt to available tools.** Detect what's there (Context7, WebSearch, MCPs, skills). Use what's available; degrade gracefully without it. Never hard-require a tool that might not be present.
 - **Adapt to host capabilities.** Detect host + capabilities at Stage 0 (`capabilities.md`). On Claude Code, drive independent phases in parallel via subagent fan-out and verify behavior end-to-end against any detected surface; on Codex, run the same plan sequentially with unit evidence. Capabilities change *how* phases are driven and *how deeply* verified — never *what the plan is*. Degrade gracefully; the portable path is always the default. See `references/claude-capabilities.md`.
 - **Memory is load-bearing.** Preload at Stage 0, surface as "Applied from memory: …" in Stage 1, write back at every phase boundary.
+- **`.supergoal/` is on disk *and* in git.** The plan is a committed artifact, not scratch — commit it at dispatch and at completion so a run survives an ephemeral session, travels with the branch, and can be handed off from the checkout. The persisted `goal_prompt.md` only delivers its guarantees once it's committed and pushed.
 - **"Perfect" is not a stopping condition — criteria are.** Translate every "perfect" into observable, falsifiable criteria.
 - **Two human gates, no more.** Clarifying gaps (Stage 1 — walk the full category checklist for greenfield in batches of up to 4 until all material info is gathered; often zero for brownfield) and plan review (Stage 6). Between and after, autonomous.
 - **The loop self-heals.** Auto-retry once, then write a fix spec and execute inline, then escalate. Don't stop on first failure.
@@ -580,7 +671,7 @@ Write the memory file under the detected MEM_DIR using the standard `name` / `de
 
 - **Very small task** (< 1 hour of work, single file): tell the user this doesn't need Supergoal, suggest just doing it. Don't force the machinery.
 - **The user pushes back on a phase during intake**: collapse, re-plan, continue.
-- **Mid-run interruption**: if the user stops the run and asks for a change, update the affected `.supergoal/phases/phase-N.md` spec, run `validate-phase.sh` on it, then ask the user to resume (they can re-dispatch the same `/goal` or just say "continue"). No need to restart phase 1.
+- **Mid-run interruption**: if the user stops the run and asks for a change, update the affected `.supergoal/plans/<slug>/phases/phase-N.md` spec, run `validate-phase.sh` on it, then ask the user to resume (they can re-dispatch the same `/goal` or just say "continue"). No need to restart phase 1.
 
 ---
 
@@ -604,7 +695,8 @@ Each script ships in two parity forms — `*.sh` (POSIX) and `*.ps1` (PowerShell
 
 ## Templates
 
-- `templates/ROADMAP.md` — phase plan with dependencies
-- `templates/STATE.md` — live progress file
+- `templates/INDEX.md` — the `.supergoal/INDEX.md` signpost: one row per plan (slug, title, status, baseline)
+- `templates/ROADMAP.md` — phase plan with dependencies (per plan)
+- `templates/STATE.md` — live progress file (per plan)
 - `templates/phase-goal.txt` — phase spec skeleton (work, criteria, evidence, mandatory commands)
-- `templates/PROTOCOL.md` — phase execution loop, failure recovery, memory writeback (copied to `.supergoal/PROTOCOL.md` at dispatch)
+- `templates/PROTOCOL.md` — phase execution loop, failure recovery, memory writeback (shared; copied to `.supergoal/PROTOCOL.md` at dispatch)

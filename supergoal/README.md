@@ -24,6 +24,21 @@ there the run is autonomous until `SUPERGOAL_RUN_COMPLETE` is printed.
 > **Note:** Slash commands only fire from *your* input — the skill never auto-dispatches
 > `/goal`. The one paste is the deliberate hand-off point.
 
+## Plans persist, and you can have more than one
+
+A plan is a **committed artifact**, not scratch. Everything lives under `.supergoal/`:
+
+```
+.supergoal/
+  INDEX.md              # signpost: every plan, its status, baseline
+  PROTOCOL.md           # shared operating manual
+  repo-state.{sh,ps1}   # shared helpers
+  plans/<slug>/         # one folder per plan (ROADMAP, STATE, phases/, goals/goal_prompt.md, …)
+```
+
+- **Persistence.** `.supergoal/` is meant to be committed (don't gitignore it). The plan — including the ready-to-paste `/goal` line saved at `plans/<slug>/goals/goal_prompt.md` — then survives an ephemeral/cloud session, travels with the branch, and can be dispatched by a teammate from the checkout alone. Stage 7 commits the plan and captures the baseline *as that commit*, so a resume can tell whether anything has changed since dispatch.
+- **Multiple plans.** Each plan gets a date-stamped `plans/<slug>/` folder, tracked in `INDEX.md`. Re-running `/supergoal` reads the signpost and offers to **resume** an in-progress plan or **start a new one**. Plans are dispatched one at a time; for genuinely parallel work, give each its own branch or git worktree (one plan per working tree).
+
 ## Install
 
 From Claude Code:
