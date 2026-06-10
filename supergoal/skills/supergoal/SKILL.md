@@ -87,6 +87,17 @@ New-Item -ItemType Directory -Force -Path "$env:SUPERGOAL_ROOT\goals" | Out-Null
 
 All artifacts live under `$SUPERGOAL_ROOT`. Skill assets (scripts, references, templates) live under `$SUPERGOAL_DIR`.
 
+### Persistence — `.supergoal/` is a committed artifact, not scratch
+
+`$SUPERGOAL_ROOT` (default `.supergoal/`) is **meant to be committed to the repo**, not gitignored. The plan (ROADMAP, phase specs, STATE, the persisted `goal_prompt.md` dispatch line, PROTOCOL, helpers) is load-bearing — committing it is what makes a run survive an ephemeral/cloud session, travel with the branch, and be handed off to a teammate or a second machine from the checkout alone. This is the same principle that drove persisting `goal_prompt.md`: everything the executing agent needs is in files on disk, and on disk means in git.
+
+Two consequences worth stating up front:
+
+- **Branch-per-plan is the natural isolation unit.** Because `.supergoal/` is committed, each git branch carries its own plan. Running `/supergoal` on a feature branch keeps that plan separate from one on another branch with zero extra machinery — different branches, different `.supergoal/`. (For multiple plans on the *same* branch, see the `plans/<slug>/` layout and `INDEX.md` signpost below.)
+- **STATE.md is volatile during a run; the plan scaffolding is stable.** The executor rewrites STATE.md every phase, so commit the stable scaffolding at dispatch (Stage 7 does this before capturing the baseline, so the baseline cleanly excludes the plan files) and let STATE churn locally; the final state is committed at completion. On a cloud/ephemeral host, commit **and push** at phase boundaries — un-pushed work is lost on idle (see `capabilities.md`).
+
+If a project's `.gitignore` already excludes `.supergoal/`, say so at Stage 6 and recommend un-ignoring it, or the persistence guarantees above don't hold.
+
 ---
 
 ## Stage 0 — Available context (memory + tools)
@@ -449,16 +460,23 @@ After Stage 6 returns "Start now" and **before** printing the `/goal` block, run
 
 Slash commands on both Claude Code and Codex fire **only from user input** — agent message text is never parsed as a command. So Stage 7 is not an automatic dispatch; it's an honest one-paste handoff. After explicit "Start now" in Stage 6:
 
-1. Update `STATE.md`: `Status: READY_TO_DISPATCH`, `Current phase: 1`, and **capture the baseline ref** — set `Baseline ref:` to the output of `git rev-parse HEAD 2>/dev/null || echo "no-git"`. The audit reads this to diff deliverables against the working tree.
+1. Update `STATE.md`: `Status: READY_TO_DISPATCH`, `Current phase: 1`. (The baseline ref is captured in step 4, after the plan is committed.)
 2. Copy `$SUPERGOAL_DIR/templates/PROTOCOL.md` to `.supergoal/PROTOCOL.md` (the operating manual the executing agent reads at the start of the `/goal` session), and copy **both** comparison helpers — `$SUPERGOAL_DIR/scripts/repo-state.sh` **and** `$SUPERGOAL_DIR/scripts/repo-state.ps1` — into `.supergoal/` (the complete-working-tree comparison helper the cleanliness + deliverable checks invoke; the executor picks the form matching its host. Strategy in `references/repo-state-comparison.md`). Copy both so the `/goal` session works regardless of host shell.
 3. Verify each `.supergoal/phases/phase-N.md` exists; validate each:
    - Unix / git-bash: `bash "$SUPERGOAL_DIR/scripts/validate-phase.sh" .supergoal/phases/phase-<N>.md`
    - Windows / PowerShell: `pwsh -NoProfile -File "$env:SUPERGOAL_DIR\scripts\validate-phase.ps1" .supergoal\phases\phase-<N>.md`
-4. **Persist the dispatch line to disk.** Write `.supergoal/goals/goal_prompt.md` — the trigger that binds ROADMAP/STATE/phases/PROTOCOL together is otherwise the one load-bearing artifact of a Supergoal run that lives only in chat scrollback. Persisting it means a deferred dispatch survives context compaction and closed sessions, a re-dispatch after BLOCKED/interruption uses a verbatim-identical end-state condition (reconstruction from memory risks a condition the evaluator never clears), and a teammate or second machine can dispatch from the repo checkout alone. The file contains, in order:
-   - **A short header** — task title, dispatch date, total phase count, and the baseline ref(s) captured in step 1. A multi-repo run records one SHA per repo, one line each. (The dispatch date + baseline ref are the staleness guard: they make a stale paste detectable against `git rev-parse HEAD`.)
-   - **The exact `/goal` command, verbatim, in a fenced block** — byte-for-byte identical to what step 5 prints in chat (same command string; do not reword or re-wrap it). This file is the canonical copy; the chat print is the convenience copy.
+4. **Commit the plan, then capture the baseline as that commit.** The plan is a durable, committable artifact (see "Persistence" above), so commit it before the autonomous run starts mutating the working tree — this is what makes a deferred dispatch survive an ephemeral session and lets a teammate dispatch from the checkout:
+   - Unix / git-bash: `git add .supergoal && git commit -m "supergoal: plan for <task title>" 2>/dev/null || true`
+   - Windows / PowerShell: `git add .supergoal; git commit -m "supergoal: plan for <task title>"` (ignore the error if there's nothing to commit or no git)
+
+   Then **capture the baseline ref** — set STATE.md's `Baseline ref:` to `git rev-parse HEAD 2>/dev/null || echo "no-git"`, which now points at **this plan commit**. Capturing the baseline *as the plan commit* is deliberate: right after dispatch `HEAD == Baseline ref`, so Stage 0's resume staleness guard reads "nothing has happened since dispatch"; once the run commits real work, HEAD moves past the baseline and the guard correctly reports progress. The audit reads this ref to diff deliverables against the working tree. (No git → `no-git`; deliverable/cleanliness checks degrade to filesystem existence — see `references/repo-state-comparison.md`.)
+5. **Persist the dispatch line to disk.** Write `.supergoal/goals/goal_prompt.md` — the trigger that binds ROADMAP/STATE/phases/PROTOCOL together is otherwise the one load-bearing artifact of a Supergoal run that lives only in chat scrollback. Persisting it means a deferred dispatch survives context compaction and closed sessions, a re-dispatch after BLOCKED/interruption uses a verbatim-identical end-state condition (reconstruction from memory risks a condition the evaluator never clears), and a teammate or second machine can dispatch from the repo checkout alone. The file contains, in order:
+   - **A short header** — task title, dispatch date, total phase count, and the baseline ref(s) captured in step 4. A multi-repo run records one SHA per repo, one line each. (The dispatch date + baseline ref are the staleness guard: they make a stale paste detectable against `git rev-parse HEAD`.)
+   - **The exact `/goal` command, verbatim, in a fenced block** — byte-for-byte identical to what step 6 prints in chat (same command string; do not reword or re-wrap it). This file is the canonical copy; the chat print is the convenience copy.
    - **One line of instructions**, exactly: "Paste the `/goal` line into your input to dispatch. If significant time has passed or the baseline ref no longer matches HEAD, re-run `/supergoal` to resume — it will re-capture the baseline and re-run pre-flight before re-issuing this file."
-5. Print a fenced code block with the **ready-to-paste `/goal` command** — identical to the one just written to `goal_prompt.md`; the condition below is short, instructional but measurable, and well under the 4000-char `/goal` argument limit:
+
+   `goal_prompt.md` and the `Baseline ref:` line from step 4 are the only plan files that postdate the commit; they ride along in the run's first commit. On a cloud/ephemeral host, commit + push them now so the dispatch line is durable before the run starts.
+6. Print a fenced code block with the **ready-to-paste `/goal` command** — identical to the one just written to `goal_prompt.md`; the condition below is short, instructional but measurable, and well under the 4000-char `/goal` argument limit:
 
 ````
 ```
@@ -466,11 +484,11 @@ Slash commands on both Claude Code and Codex fire **only from user input** — a
 ```
 ````
 
-6. Follow the fenced block with **exactly this one-line instruction**:
+7. Follow the fenced block with **exactly this one-line instruction**:
 
 > **Paste the `/goal` line above into your input to dispatch the chain.** It's also saved at `.supergoal/goals/goal_prompt.md`, so you can dispatch later or from another checkout even if this session closes. From there it runs autonomously — auto-retry, fix-spec recovery, per-phase memory writeback — until `SUPERGOAL_RUN_COMPLETE` appears.
 
-7. **Stop.** Do not generate any further output. The Supergoal invocation ends here. The user's paste begins the autonomous run under a fresh `/goal` session, which reads `PROTOCOL.md`, `ROADMAP.md`, `STATE.md`, and the phase specs from disk and runs the loop documented in the next sections.
+8. **Stop.** Do not generate any further output. The Supergoal invocation ends here. The user's paste begins the autonomous run under a fresh `/goal` session, which reads `PROTOCOL.md`, `ROADMAP.md`, `STATE.md`, and the phase specs from disk and runs the loop documented in the next sections.
 
 Once `/goal` is active (you'll see the `◎ /goal active` indicator on Claude Code), the per-turn evaluator keeps the agent working until the end-state condition holds. On Codex, the auto-continuation loop does the same. The agent inside the `/goal` session has zero special context from the Supergoal invocation; everything it needs is in the files on disk — by design.
 
@@ -576,6 +594,7 @@ Write the memory file under the detected MEM_DIR using the standard `name` / `de
 - **Adapt to available tools.** Detect what's there (Context7, WebSearch, MCPs, skills). Use what's available; degrade gracefully without it. Never hard-require a tool that might not be present.
 - **Adapt to host capabilities.** Detect host + capabilities at Stage 0 (`capabilities.md`). On Claude Code, drive independent phases in parallel via subagent fan-out and verify behavior end-to-end against any detected surface; on Codex, run the same plan sequentially with unit evidence. Capabilities change *how* phases are driven and *how deeply* verified — never *what the plan is*. Degrade gracefully; the portable path is always the default. See `references/claude-capabilities.md`.
 - **Memory is load-bearing.** Preload at Stage 0, surface as "Applied from memory: …" in Stage 1, write back at every phase boundary.
+- **`.supergoal/` is on disk *and* in git.** The plan is a committed artifact, not scratch — commit it at dispatch and at completion so a run survives an ephemeral session, travels with the branch, and can be handed off from the checkout. The persisted `goal_prompt.md` only delivers its guarantees once it's committed and pushed.
 - **"Perfect" is not a stopping condition — criteria are.** Translate every "perfect" into observable, falsifiable criteria.
 - **Two human gates, no more.** Clarifying gaps (Stage 1 — walk the full category checklist for greenfield in batches of up to 4 until all material info is gathered; often zero for brownfield) and plan review (Stage 6). Between and after, autonomous.
 - **The loop self-heals.** Auto-retry once, then write a fix spec and execute inline, then escalate. Don't stop on first failure.

@@ -3,6 +3,25 @@
 This is the changelog for the **content-skills adaptation** of `supergoal`. For the upstream
 project's history, see https://github.com/robzilla1738/supergoal.
 
+## 0.9.0-win.1
+
+Makes a Supergoal plan a **durable, committed artifact** and lays the groundwork for
+**multiple plans per repo**.
+
+**Persistence — `.supergoal/` is committed, not scratch.**
+
+- New "Persistence" section in `SKILL.md`: `$SUPERGOAL_ROOT` (default `.supergoal/`) is meant to
+  be committed, not gitignored. Committing it is what makes a run survive an ephemeral/cloud
+  session, travel with the branch, and be handed off from the checkout alone — the same principle
+  that drove persisting `goal_prompt.md`.
+- **Branch-per-plan** is now the documented natural isolation unit: because `.supergoal/` is
+  committed, each branch carries its own plan with zero extra machinery.
+- **Stage 7** now commits the plan *before* capturing the baseline, and captures the baseline **as
+  that plan commit**, so right after dispatch `HEAD == Baseline ref` and Stage 0's resume staleness
+  guard reads "unchanged"; once the run commits real work, HEAD moves past the baseline. New
+  operating principle records the convention. If a project gitignores `.supergoal/`, Stage 6 flags
+  it.
+
 ## 0.8.0-win.1
 
 Persists the **Stage 7 `/goal` dispatch line** to `.supergoal/goals/goal_prompt.md`. Previously
