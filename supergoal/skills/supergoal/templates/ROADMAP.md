@@ -1,5 +1,6 @@
 # Roadmap: {{TASK_TITLE}}
 
+**Plan:** {{SLUG}}    <!-- lives at .supergoal/plans/{{SLUG}}/ ; indexed in .supergoal/INDEX.md -->
 **Task:** {{ONE_LINE_TASK}}
 **Type:** {{TAGS}}
 **Created:** {{DATE}}

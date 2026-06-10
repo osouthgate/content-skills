@@ -22,6 +22,29 @@ Makes a Supergoal plan a **durable, committed artifact** and lays the groundwork
   operating principle records the convention. If a project gitignores `.supergoal/`, Stage 6 flags
   it.
 
+**Multiple plans per repo — `plans/<slug>/` layout + `INDEX.md` signpost.**
+
+- `$SUPERGOAL_ROOT` now holds **shared, plan-agnostic assets** at its root (`INDEX.md`, `PROTOCOL.md`,
+  `repo-state.{sh,ps1}`) and **one folder per plan** under `plans/<slug>/` (ROADMAP, STATE, THINKING,
+  capabilities, tools, context, recon, `goals/goal_prompt.md`, `phases/`). New env vars
+  `SUPERGOAL_PLAN` (slug) and `SUPERGOAL_PLAN_DIR` carry the active plan; the slug is
+  `YYYY-MM-DD-<kebab-task>`.
+- **Stage 0** now opens with **Plan selection**: read the `INDEX.md` signpost, and if any plan is
+  `READY_TO_DISPATCH` / `IN_PROGRESS` / `BLOCKED`, ask whether to resume it or start a new one
+  (resume skips the memory/tools/recon passes). New runs mint a slug, create the plan dir, and add an
+  `INDEX.md` row. Resume detection re-validates baseline/pre-flight, then points at that plan's
+  `goal_prompt.md`.
+- The single `/goal` condition, `goal_prompt.md`, PROTOCOL.md, goal-format.md, the phase-spec
+  template, and all stage instructions now address per-plan artifacts via `.supergoal/plans/<slug>/…`
+  while keeping the shared `PROTOCOL.md` / `repo-state.{sh,ps1}` at root. PROTOCOL.md gained a "Your
+  plan directory" header and refers to plan files as `<plan-dir>/…`.
+- New `templates/INDEX.md`; STATE.md / ROADMAP.md templates gained a `Plan:` slug line and the full
+  status lifecycle (PLANNING → READY_TO_DISPATCH → IN_PROGRESS → COMPLETE, BLOCKED). README documents
+  persistence + multiple plans.
+- **Concurrency is honest:** plans coexist on disk and dispatch one at a time; two `/goal` loops in
+  one working tree would collide, so genuinely parallel plans need separate branches/worktrees.
+- No helper-script changes — `.sh`/`.ps1` parity is unaffected (model Write steps only).
+
 ## 0.8.0-win.1
 
 Persists the **Stage 7 `/goal` dispatch line** to `.supergoal/goals/goal_prompt.md`. Previously

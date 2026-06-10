@@ -15,7 +15,7 @@ present.
 
 ## The profile
 
-Stage 0 writes `$SUPERGOAL_ROOT/capabilities.md` with these fields. Detect each by
+Stage 0 writes `$SUPERGOAL_PLAN_DIR/capabilities.md` (this plan's folder) with these fields. Detect each by
 inspecting the **tool list** and **environment**, not by guessing:
 
 | Capability | Signal (present → capable) | Portable fallback when absent |

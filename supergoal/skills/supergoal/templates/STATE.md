@@ -1,10 +1,11 @@
 # State: {{TASK_TITLE}}
 
-**Status:** PLANNING → IN_PROGRESS → COMPLETE
+**Plan:** {{SLUG}}    <!-- this plan's folder: .supergoal/plans/{{SLUG}}/ ; also a row in .supergoal/INDEX.md -->
+**Status:** PLANNING → READY_TO_DISPATCH → IN_PROGRESS → COMPLETE   (BLOCKED if a 3-strike handoff fires)
 **Current phase:** —
 **Started:** {{DATE}}
 **Last update:** {{DATE}}
-**Baseline ref:** {{BASELINE_SHA}}    <!-- HEAD sha captured at Stage 7 dispatch; the audit + cleanliness checks compare the COMPLETE working tree (committed + staged + unstaged + untracked) against it via repo-state.sh -->
+**Baseline ref:** {{BASELINE_SHA}}    <!-- the PLAN-COMMIT sha captured at Stage 7 dispatch (HEAD == this right after dispatch); the audit + cleanliness checks compare the COMPLETE working tree (committed + staged + unstaged + untracked) against it via repo-state.sh -->
 
 
 ## Phase progress
