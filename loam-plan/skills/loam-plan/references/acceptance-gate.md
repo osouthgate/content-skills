@@ -77,6 +77,34 @@ plan sets `acceptance: exempt — <reason>` in frontmatter and skips Phase 3 ent
 is **explicit** — an honest exemption with a reason, never a silent skip because writing tests
 was inconvenient.
 
+## 7. Defer to the repo's native gate
+
+If the repo already enforces test-first through its **own** mechanism — e.g. osdb's per-ticket
+`plans/test-plans/<ticket>.md` written before code, wired into the PR template, with a Stage 1–4
+model in a test-planning playbook that *explicitly disclaims external skills* — then **conform to
+it**. Emit that artifact from its template and map the work to the repo's stage; do not impose a
+parallel sealed-`__tests__/` + `spec_sha` ritual on top. Two competing gates is worse than one
+native one. (Declared via `acceptance.native_gate` in the repo config.)
+
+## 8. The `specified-unwitnessed` state — when you can't run red here
+
+The sealed gate's promise is a *witnessed* red proof. But a fresh clone, a Docker-required test
+substrate (Testcontainers), or a CI-less sandbox can leave you unable to actually run the test.
+That's a normal state — and it is **not** the same as `exempt` (which means no test is needed).
+
+When it happens, set `acceptance: specified-unwitnessed`:
+
+- Tests are still **written** into the plan as code blocks (+ the throwing stub).
+- `spec_sha: pending` and `### Red proof` is honestly empty with the reason and the exact command
+  to witness it: e.g. `pending — deps not installed; run \`pnpm install && pnpm test -- X\` to witness red`.
+- Prefer **mock-based unit tests** for the red gate when the repo's integration tests need Docker —
+  so the proof *can* be captured on a bare clone.
+- This is **loud**: the build's first act is to install/run and witness red before writing code. It
+  is a deferral of the *proof*, never a skip of the *gate*.
+
+States, summarized: `required` (proof captured) · `specified-unwitnessed` (proof deferred, loudly) ·
+`exempt — <reason>` (no test needed).
+
 ## The artifact
 
 ```markdown

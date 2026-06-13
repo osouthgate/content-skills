@@ -47,17 +47,24 @@ differ too. **Never hardcode paths or commands — resolve them.**
 
 1. **Read the repo config if present:** `.claude/loam-plan.yml` (or `.loam-plan.yml` at root).
    See `references/config.md` for the schema. It declares the lattice dirs, the plan-status
-   folders, the gate commands, and the test layout.
-2. **Otherwise auto-detect** and state your assumptions out loud:
+   folders, the gate commands, the test layout, and (if any) the repo's native gate.
+2. **Always auto-detect, and VERIFY any profile/config against the actual tree.** A profile or a
+   `references/config.md` "known repo profiles" row can be stale (docs get moved). For each path the
+   config claims, confirm it exists. **On mismatch, trust the tree and warn** — never grep a moved
+   directory, find no design, and wrongly trip the lattice gate. Auto-detect:
    - Lattice: probe for `docs/designs/`, `docs/how-to/`, and `plans/` (with status subfolders
-     `backlog/ toDo/ in_progress/ done/`). loam-web matches this exactly.
+     `backlog/ toDo/ in_progress/ done/`).
    - Gates: read `package.json` scripts (`type-check`, `lint`, `test`, `test:*`, `eval:*`) or a
-     `gates.md` at root. List what you'll run as the red/green check.
-   - Tests: infer the convention (e.g. loam-web colocates `__tests__/`; osdb uses `packages/*/test/`).
+     `gates.md` at root.
+   - Tests + **substrate**: infer the convention (colocated `__tests__/` vs central `packages/*/test/`)
+     **and whether the test run is lightweight or Docker-required** (grep for Testcontainers / a
+     `docker info` precondition in CLAUDE.md). This decides whether Phase 3 can witness a red proof here.
+   - **Native gate**: check for a repo-owned test-first mechanism (e.g. a `plans/test-plans/` folder +
+     a test-planning playbook). If present, Phase 3 defers to it (see Phase 3).
 3. If you cannot find a `plans/` location, ask where plans live before continuing. Do not invent one.
 
-Print a one-line config summary (lattice dirs + gate commands + test layout) so the user can
-correct a bad auto-detect before any files are written.
+Print a one-line config summary (lattice dirs + gate commands + test substrate + native gate?) so the
+user can correct a bad auto-detect before any files are written.
 
 ---
 
@@ -133,7 +140,20 @@ don't reinvent a pattern the repo already has.
 
 This is what makes the plan trustworthy: a set of tests/evals that are **RED now and must be
 GREEN at completion** — the machine-checkable definition of done. Read `references/acceptance-gate.md`
-for the full mechanics. The six rules that make it a real gate, not theatre:
+for the full mechanics.
+
+**First, two routing checks (from Phase 0):**
+
+- **Does the repo have a NATIVE test-first gate?** (config `acceptance.native_gate`, e.g. a
+  `plans/test-plans/<ticket>.md` per-ticket model wired into the PR template.) If so, **defer to it**:
+  emit *that* artifact from its template and map the work to the repo's stage model — do **not**
+  impose the sealed `__tests__/` + `spec_sha` ritual on top. Conform to the repo, don't compete.
+- **Can a red proof actually be WITNESSED here?** If the test substrate is Docker-required or deps
+  aren't installed (fresh clone / sandbox / CI-less box), you may not be able to run the test red.
+  That's a normal state with its own acceptance value — see the `specified-unwitnessed` state below.
+  Prefer mock-based unit tests (no Docker) for the red gate when the repo's integration tests need it.
+
+The six rules that make the sealed-commit gate a real gate, not theatre:
 
 1. **Write the failing tests yourself and commit them RED** — as the *first commit on the
    feature branch*, before any implementation. (Create/checkout the feature branch first if the
@@ -152,6 +172,17 @@ for the full mechanics. The six rules that make it a real gate, not theatre:
    build. This is the only real defense against the build agent editing a test to pass.
 6. **Exemption valve** — non-code plans (docs, pure design) set `acceptance: exempt — <reason>`
    in frontmatter and skip this phase. Explicit, never silent.
+
+**Three acceptance states** (pick one, record it in frontmatter — never silently skip):
+
+- `required` — red proof captured: tests written, run, failing for the right reason, `### Red proof`
+  pasted, `spec_sha` recorded. The full gate.
+- `specified-unwitnessed` — **code plan, but the red proof can't be captured in this environment**
+  (no deps / Docker-required substrate / sandbox). The tests are still written into the plan as code
+  blocks + stub, but `spec_sha` is `pending` and `### Red proof` is honestly empty with the reason
+  ("deps not installed; run `pnpm install && <test cmd>` to witness"). This is **loud, not a skip** —
+  the build must witness red before it starts. Distinct from `exempt`.
+- `exempt — <reason>` — no test is meaningful (docs / pure design). Skip the phase.
 
 Fill the `## Acceptance` section with the runnable commands and their current RED state:
 

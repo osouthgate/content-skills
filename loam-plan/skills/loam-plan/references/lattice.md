@@ -50,6 +50,11 @@ Rules:
 - **Trigger on the seam, not always.** Only fold the sibling repo's lattice in when the subject
   touches the contract (e.g. for loam-web ↔ osdb: memory, knowledge, connectors, search, entity
   resolution, graph, RAG). Single-repo subjects skip it.
+- **Sharing a noun is not crossing the contract.** A subject that merely *mentions* a seam concept
+  (e.g. an osdb-internal "graph-sync outbox health metric" contains the word "graph") does **not**
+  cross the boundary. The test: does this plan *read or write the sibling's data/contract*? If it
+  only touches one repo's internals — even on a shared topic — it's single-repo. Over-folding the
+  sibling's docs drafts the plan half-blind from the *wrong* side.
 - **Read the contract rule first** (e.g. loam-web's `.claude/rules-library/cross-repo-contracts.md`).
 - **Fold in if local, link if not.** If the sibling repo is checked out, add its `docs/designs/` +
   `docs/how-to/` + integration map to `## Grounding`. If not, record where the design lives and flag
