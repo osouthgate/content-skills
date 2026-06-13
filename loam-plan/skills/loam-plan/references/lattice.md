@@ -37,3 +37,25 @@ When you plan something whose how-to doesn't exist yet, you don't block — you 
 debt**: note in the plan's `## How-to debt` section which guide must be written when the work
 ships. This keeps the lattice honest over time (every shipped design ends up with a how-to)
 without making the plan wait on documentation.
+
+## Cross-repo lattices
+
+A subject can span a contract boundary — an app layer that calls a storage/API layer lives in two
+repos. When it does, the **lattice spans both**: the consumer's `docs/` holds its slice, but the
+*authoritative design for the boundary's behavior lives in the provider repo*. Grounding a
+boundary-crossing plan from the consumer's docs alone drafts it half-blind.
+
+Rules:
+
+- **Trigger on the seam, not always.** Only fold the sibling repo's lattice in when the subject
+  touches the contract (e.g. for loam-web ↔ osdb: memory, knowledge, connectors, search, entity
+  resolution, graph, RAG). Single-repo subjects skip it.
+- **Read the contract rule first** (e.g. loam-web's `.claude/rules-library/cross-repo-contracts.md`).
+- **Fold in if local, link if not.** If the sibling repo is checked out, add its `docs/designs/` +
+  `docs/how-to/` + integration map to `## Grounding`. If not, record where the design lives and flag
+  it read-before-build. Never draft a boundary plan silently from one side.
+- **Direction is asymmetric.** The *consumer conforms to the provider's design*. The provider does
+  not couple up — it only consults the integration map for "who consumes this." (This mirrors a
+  one-way dependency boundary like "the storage layer never calls the app layer.")
+- This is exactly why both repos benefit from the **same lattice shape** — so the sibling's docs are
+  readable the same way as the home repo's.

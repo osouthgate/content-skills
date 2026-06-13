@@ -73,6 +73,14 @@ Search the three lattice layers and the related code for the subject. This is th
 - **Code:** find the touchpoints — the files/modules this work will change. Cite them by path.
 - **Ticket:** if the subject is `LOA-XXX`, pull the ticket (Linear MCP if available) for acceptance
   criteria and link it.
+- **Cross-repo:** if this repo calls a paired/sibling repo across a contract boundary (e.g. an app
+  layer calling a storage/API layer), the authoritative *design* for that boundary's behavior may
+  live in the **other** repo, not here. When the subject touches that seam: read this repo's
+  cross-repo-contracts rule (if any) first, then — if the sibling repo is checked out locally — fold
+  its `docs/designs/` + `docs/how-to/` + any integration map into the grounding. If it isn't local,
+  record in `## Grounding` where the cross-repo design lives (link it) and flag it read-before-build.
+  Direction matters: a *consumer* conforms to the *provider's* design; the provider only consults the
+  integration map for "who consumes this," it does not couple up. Skip when the subject is single-repo.
 
 Resolve which **routing row** you're in (see `references/lattice.md` for the full table):
 

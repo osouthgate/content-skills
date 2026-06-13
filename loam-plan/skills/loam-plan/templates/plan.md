@@ -22,6 +22,7 @@ sealed_paths:                # test/eval files the build may NOT edit
 - **Related plans:** {{RELATED_PLANS}}
 - **Conforms to pattern:** {{PATTERN}}            <!-- named pattern from the how-to -->
 - **Code touchpoints:** {{TOUCHPOINTS}}
+- **Cross-repo design:** {{XREPO}}               <!-- sibling-repo docs/designs/* + integration map for boundary-crossing subjects; "N/A — single-repo" or "not checked out — <link>" otherwise -->
 - **Ticket:** {{TICKET}}
 
 ## Goal
