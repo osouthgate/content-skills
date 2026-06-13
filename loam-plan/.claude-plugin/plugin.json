@@ -1,0 +1,22 @@
+{
+  "name": "loam-plan",
+  "description": "Turn an idea or ticket into a grounded, test-first plan. Reads the repo's design → how-to → plan lattice, refuses to plan an undesigned thing, drafts a self-grounding plan, scaffolds a failing-test acceptance gate (committed red as the first commit on the branch), then auto-invokes plan-eng-review. Portable across repos via a per-repo config; proven against loam-web's docs/ + plans/ taxonomy.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "planning",
+    "spec",
+    "tdd",
+    "test-first",
+    "acceptance-gate",
+    "context-assembly",
+    "agent",
+    "workflow"
+  ]
+}

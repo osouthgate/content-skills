@@ -23,6 +23,11 @@
       "name": "autonomous-run",
       "source": "./autonomous-run",
       "description": "Configure Claude Code for a long unattended run: auto permissions, dynamic-workflow subagent fan-out, /goal or /loop persistence, cloud execution, and end-to-end self-verification. Detects which levers are available and hands off cleanly. Pairs with supergoal."
+    },
+    {
+      "name": "loam-plan",
+      "source": "./loam-plan",
+      "description": "Turn an idea or ticket into a grounded, test-first plan. Reads the repo's design → how-to → plan lattice, refuses to plan an undesigned thing, drafts a self-grounding plan, scaffolds a failing-test acceptance gate committed RED as the first commit on the branch, then auto-invokes plan-eng-review. Portable via a per-repo config; proven against loam-web's docs/ + plans/ taxonomy."
     }
   ]
 }
