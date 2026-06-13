@@ -46,13 +46,14 @@ So "build a plan from an idea" is really a transition across this lattice, and t
 
 ## `loam-plan` design
 
-### One skill, three phases
+### One skill, four phases
 
 `loam-plan <idea | LOA-XXX>`:
 
 1. **Assemble lattice context.** Read `docs/designs/`, `docs/how-to/`, `plans/*` (+ folder = status), and the related code touchpoints for the subject.
 2. **Draft the plan, grounded in that context** → `plans/toDo/plan-X.md`, conforming to the patterns named in the relevant how-to.
-3. **Auto-invoke `plan-eng-review`** on its own draft (decided 2026-06-13). One command yields a grounded **and** critiqued plan — fits the autonomous-run direction.
+3. **Scaffold the acceptance gate** — write the failing tests/evals + typed stubs, run them red, commit them as the first commit on the branch (see below).
+4. **Auto-invoke `plan-eng-review`** on its own draft (decided 2026-06-13). One command yields a grounded, test-anchored **and** critiqued plan — fits the autonomous-run direction.
 
 Context-assembly is a *phase inside* `loam-plan`, **not** a separate skill — YAGNI until a second consumer (office-hours, investigate) actually needs it. Extract then, not now.
 
@@ -83,6 +84,35 @@ Don't teach `plan-eng-review` (or any reviewer) to chase down the design and how
 ```
 
 Now `plan-eng-review` needs **zero changes** — it reads a richer artifact and the how-to context is already *in* the plan. A human skimming the plan gets the same grounding. This mirrors our own rule "the resume schema is the state machine, not the UI": **put the contract in the artifact, not the tool that reads it.**
+
+### Test-first — the acceptance gate (phase 3)
+
+`loam-plan` makes the plan **test-first**: it scaffolds a concrete, executable set of tests/evals that are **RED at plan start and must be GREEN at completion**. This is the machine-checkable definition of done — supergoal builds toward it, the audit verifies against it, and you never read the diff to know it's finished.
+
+Six things have to be true for this to be a real gate and not theatre:
+
+1. **`loam-plan` writes the failing tests itself and commits them red** — as the *first commit on the feature branch*, before any implementation. Test-first only has teeth if the red tests are committed; that's what lets the build and audit check against *committed* tests, not the agent's self-report. Planning owns the scaffold; supergoal fleshes out the implementation to turn them green.
+2. **Scaffold typed stubs that throw — not just tests — or you deadlock on commit.** Committed tests importing not-yet-existing exports send strict `type-check` red, and the build's "baseline must be green" gate then refuses to start. Fix: also scaffold the stub (`export function fooBar(): X { throw new NotImplementedError() }`). Type-check passes; tests fail at runtime/assertion — *compiles, doesn't work yet*, which is the state you want.
+3. **Run them red and paste the output into the plan.** A test red from a typo/bad import is a worthless gate. `loam-plan` runs the suite, confirms it fails *for the right reason*, and pastes the red output into the plan so "done" has a witnessed starting line.
+4. **Evals are threshold/golden-set, not exact.** For recall / GATEKEEPER / ERB-shaped work, green = *meets threshold* (`eval:recall --suite X --threshold 0.8`), never exact orderings (the existing test-plan template already prescribes this). The acceptance entry records *suite + threshold*; red = below threshold or suite errors.
+5. **Seal the tests, enforce out-of-band.** Record test paths + `spec_sha` in the plan frontmatter; the build audit hard-fails on any `git diff` to those paths, and a `PreToolUse` hook blocks Edit/Write on them during the build. The seal is the only real defense — under 3-strike pressure the build agent will otherwise just edit the failing test to pass. An in-prompt "don't touch the tests" rule always fails.
+6. **One exemption valve.** Not every plan is code (this very doc PR isn't). The acceptance gate is mandatory *unless* the plan declares `acceptance: exempt — <reason>` in frontmatter. Explicit exemption, never silent bypass.
+
+The artifact shape — an `## Acceptance` section that is a list of commands, RED now → GREEN at done:
+
+```markdown
+## Acceptance
+acceptance: required
+spec_sha: <sha of the red-test commit>
+sealed_paths:
+  - apps/web/src/features/X/__tests__/X.test.ts
+  - evals/src/recall/suites/X.ts
+
+- [ ] pnpm test -- features/X            # RED now (3 assertions fail); GREEN at done
+- [ ] pnpm eval:recall --suite X --threshold 0.8   # RED now (0.0); GREEN at done
+```
+
+This is the same self-grounding principle applied to *done* instead of *context*: the definition of done lives in the artifact as executable commands, not in anyone's head.
 
 ---
 
