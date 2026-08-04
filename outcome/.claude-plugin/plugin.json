@@ -1,0 +1,22 @@
+{
+  "name": "outcome",
+  "description": "Turn a requirement, idea, or transcript into ONE outcome doc per capability. Human decisions enter verbatim and first (a protected §0 TLDR a founder reads in 60 seconds: outcome line, rules as bullets, how-we'll-know); the agent derives invariants, mechanism with file:line evidence, Given/When/Then acceptance, and build phases. Includes a review mode that applies the framework as a code-verified rubric to docs authored elsewhere, and an arm mode that turns acceptance rows into red tests before building.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "planning",
+    "design-docs",
+    "outcome-driven",
+    "invariants",
+    "acceptance-tests",
+    "spec",
+    "review",
+    "claude-code"
+  ]
+}

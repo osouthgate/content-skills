@@ -23,6 +23,11 @@
       "name": "autonomous-run",
       "source": "./autonomous-run",
       "description": "Configure Claude Code for a long unattended run: auto permissions, dynamic-workflow subagent fan-out, /goal or /loop persistence, cloud execution, and end-to-end self-verification. Detects which levers are available and hands off cleanly. Pairs with supergoal."
+    },
+    {
+      "name": "outcome",
+      "source": "./outcome",
+      "description": "Turn a requirement, idea, or transcript into ONE outcome doc per capability: a protected 60-second §0 TLDR (outcome, verbatim rules mapped to acceptance-test IDs, success signal), then agent-derived invariants, mechanism with file:line evidence, Given/When/Then acceptance, and build phases. Includes a code-verified review rubric for docs authored elsewhere and a red-test arm mode."
     }
   ]
 }
