@@ -1,0 +1,28 @@
+{
+  "$schema": "promise.config/v1",
+  "docsHome": "docs/designs",
+  "commands": {
+    "typeCheck": "pnpm type-check",
+    "test": "pnpm test",
+    "lint": "pnpm lint"
+  },
+  "map": {
+    "recipe": "docs/testing/adding-or-extending-a-capability.md",
+    "index": "docs/testing/AGENTS.md",
+    "find": "pnpm capability:find",
+    "row": "pnpm capability:find --row",
+    "nextId": "pnpm capability:find --next-id",
+    "rowIdPattern": "^C\\d+[a-z]?$",
+    "lanes": {
+      "data": "tests[]",
+      "response": "tests[]",
+      "perception": "e2eTests[]",
+      "judgement": "evalTests[]",
+      "sibling": "osdbTests[]"
+    },
+    "checks": [
+      "npx vitest run apps/web/src/__tests__/capability-coverage.test.ts",
+      "pnpm test:declare"
+    ]
+  }
+}

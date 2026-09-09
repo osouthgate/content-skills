@@ -1,0 +1,38 @@
+{
+  "$schema": "promise.config/v1",
+  "$comment": "Config for the promise plugin, at .claude/promise.config.json. Every field here is optional — a project with none of this still gets full detection (see references/config.md). docsHome / frameworkPath / plansFolder / commands pin what orient.py would otherwise detect. map turns on the bridge to a project's own machine-checked register of promises; most projects start with no map object at all. Delete whatever this project does not need — this file shows every field at once so each one has an example, not a starting point to trim.",
+  "docsHome": "docs/designs",
+  "frameworkPath": "docs/how-to/outcome-framework.md",
+  "plansFolder": "plans",
+  "commands": {
+    "$comment": "The verify commands arm/intake/reconcile run at the end of a writing run. Any of the three may be null to say explicitly 'this project has none' rather than leaving detection to guess.",
+    "typeCheck": "pnpm type-check",
+    "test": "pnpm test",
+    "lint": "pnpm lint"
+  },
+  "map": {
+    "$comment": "Present only when this project keeps its own capability map — a machine-checked register of promises and the tests that prove them. recipe is the authority for mechanics: read it, do not expect this skill to restate it. find/row/nextId are shell commands run verbatim with an argument appended. rowIdPattern validates any row id this skill writes or parses. lanes maps the four altitudes (plus sibling) to this project's own evidence-array names, so references/altitude.md can stay generic. checks run, in order, at the end of arm/intake/reconcile. issueTracker enables a duplicate-issue search before anything gets filed. Omit this whole object for a project with no map yet — see references/config.md 'Without a map'.",
+    "recipe": "docs/how-to/adding-a-capability.md",
+    "index": "docs/how-to/capability-map-index.md",
+    "find": "scripts/capability-find",
+    "row": "scripts/capability-find --row",
+    "nextId": "scripts/capability-find --next-id",
+    "rowIdPattern": "^CAP-\\d+$",
+    "lanes": {
+      "data": "tests[]",
+      "response": "tests[]",
+      "perception": "e2eTests[]",
+      "judgement": "evalTests[]",
+      "sibling": "siblingTests[]"
+    },
+    "checks": [
+      "scripts/capability-check",
+      "scripts/citation-strength-check"
+    ],
+    "issueTracker": {
+      "kind": "github",
+      "repo": "owner/repo",
+      "template": ".github/ISSUE_TEMPLATE/capability.md"
+    }
+  }
+}

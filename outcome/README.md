@@ -1,5 +1,7 @@
 # outcome
 
+> **Superseded by [`promise`](../promise/README.md)** — the same Outcome Framework, now with seven modes, shape-linting scripts, and a per-project config so no private fork is needed. `outcome` stays for one release; new work should install `promise`.
+
 > One doc per capability, with the human's decisions in verbatim and first — and a
 > §0 TLDR a founder can read in 60 seconds and disagree with.
 
