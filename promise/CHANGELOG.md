@@ -33,6 +33,9 @@ release with a pointer here.
   `framework_section.py` prints only the framework sections a mode names in its header,
   so a run loads what it needs rather than the whole contract. Standard library only;
   one implementation for every OS.
+- **No composed shell strings.** `adapter.py` runs every configured project command with
+  the user's text as one argument, and `show` lists them before any runs. `render_outcome.py`
+  instantiates the template and refuses to overwrite.
 - **Tests.** `python3 -m unittest discover -s promise/tests -v` covers each lint rule
   with a one-change fixture, `orient.py` against a fixture repo and an empty directory,
   and `outcome_rows.py` round-trips.

@@ -1,4 +1,4 @@
-Read before this: references/slates.md · references/anti-rationalizations.md · references/altitude.md · templates/outcome-doc.md · outcome-framework.md § The contract · § The template · § Section rules
+Read before this: references/slates.md · references/anti-rationalizations.md · references/altitude.md · templates/outcome-doc.md · outcome-framework.md § The contract · § Section rules
 Phase 0 line: mode `new` (say if inferred), framework source, docs home + its source, `plansFolder` (or "none"), whether a map is configured, and whether the project is adopted.
 Writes: one new doc under `docsHome`.
 
@@ -58,12 +58,16 @@ for the same capability.
   migrate it into the new doc's §7, then propose deleting the plan file. It
   receives no new docs.
 - Wait for the user's yes before deleting anything.
+- `docsHome` is null → ask where outcome docs should live before writing a word.
+  A folder is created only on the user's explicit say-so here, or through `adopt`.
 
 ## Draft the agent half
 
-Start from templates/outcome-doc.md. Every current-state claim carries
-file:line evidence, verified this run — never remembered from an earlier
-one.
+Instantiate the template with `python3 "${CLAUDE_SKILL_DIR}/scripts/render_outcome.py"
+--title "<Capability>" --owner "<name>"` — it writes `<docsHome>/<slug>.md`, refuses
+to overwrite, and leaves every interview placeholder for you to fill. Every
+current-state claim carries file:line evidence, verified this run — never
+remembered from an earlier one.
 
 - **§3 Worked examples:** extend the user's seed to cover at minimum the
   happy path, the disconnect/undo path, and the permission-removal path —

@@ -67,6 +67,16 @@ def orientation_of(cwd: str, mode: str = None) -> dict:
     return json.loads(result.stdout)
 
 
+def write_config(cwd: str, config: dict) -> Path:
+    """Write cwd/.claude/promise.config.json — the primary location
+    orient.py checks first — with the given object."""
+    config_dir = Path(cwd) / ".claude"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "promise.config.json"
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 class ScriptsExistTests(unittest.TestCase):
     def test_all_four_scripts_exist(self):
         for path in (ORIENT, LINT, ROWS, ADOPT):
@@ -214,8 +224,8 @@ class OrientEmptyDirTests(unittest.TestCase):
         expected_keys = {
             "skillDir", "cwd", "mode", "frameworkPath", "frameworkSource",
             "config", "docsHome", "docsHomeSource", "plansFolder", "commands",
-            "map", "claudeMd", "adopted", "existingDocs", "warnings",
-            "suggestedMode", "signals",
+            "map", "mapUsable", "claudeMd", "adopted", "existingDocs", "warnings",
+            "suggestedMode", "signals", "ambiguous",
         }
         self.assertEqual(set(data.keys()), expected_keys)
 
@@ -460,6 +470,383 @@ class AdoptTests(unittest.TestCase):
     def test_bad_cwd_is_usage_error(self):
         result = run(ADOPT, "--cwd", str(Path(self.cwd) / "does-not-exist"))
         self.assertEqual(result.returncode, 2)
+
+
+class AdoptConfigShadowingTests(unittest.TestCase):
+    """adopt.py must never write a second, higher-priority config when one
+    is already loaded from the root promise.config.json fallback
+    (architecture.md SS6's own load order): a fresh `.claude/…` config
+    with "map": null would silently shadow a real map underneath it."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cwd = self._tmp.name
+
+    def test_root_fallback_config_with_a_map_is_never_shadowed(self) -> None:
+        root_config_path = Path(self.cwd) / "promise.config.json"
+        root_map = {
+            "recipe": "docs/testing/adding-a-capability.md",
+            "find": "pnpm capability:find",
+            "row": "pnpm capability:find --row",
+            "lanes": {"data": "tests[]"},
+        }
+        root_config_path.write_text(
+            json.dumps({"docsHome": "docs/designs", "map": root_map}, indent=2), encoding="utf-8"
+        )
+
+        result = run(ADOPT, "--cwd", self.cwd)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+
+        self.assertFalse(data["configWritten"])
+        self.assertFalse((Path(self.cwd) / ".claude" / "promise.config.json").exists())
+        self.assertEqual(data["configPath"], str(root_config_path.resolve()))
+
+        orientation = orientation_of(self.cwd)
+        self.assertTrue(orientation["config"]["loaded"])
+        self.assertEqual(orientation["map"], root_map)
+        self.assertTrue(orientation["mapUsable"])
+        self.assertTrue(orientation["adopted"])
+
+    def test_claude_md_points_at_the_loaded_root_path_not_dot_claude(self) -> None:
+        root_config_path = Path(self.cwd) / "promise.config.json"
+        root_config_path.write_text(
+            json.dumps({"map": {"recipe": "r", "find": "f", "row": "r", "lanes": {}}}),
+            encoding="utf-8",
+        )
+
+        run(ADOPT, "--cwd", self.cwd)
+        claude_md = (Path(self.cwd) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("promise.config.json", claude_md)
+        self.assertNotIn(".claude/promise.config.json", claude_md)
+
+    def test_primary_path_config_is_unaffected_by_the_fix(self) -> None:
+        # No root fallback in play at all: a config loaded from the
+        # primary .claude/ path behaves exactly as before.
+        claude_dir = Path(self.cwd) / ".claude"
+        claude_dir.mkdir(parents=True)
+        primary_path = claude_dir / "promise.config.json"
+        original_text = '{\n  "docsHome": "docs/rfcs",\n  "map": null\n}\n'
+        primary_path.write_text(original_text, encoding="utf-8")
+
+        result = run(ADOPT, "--cwd", self.cwd)
+        data = json.loads(result.stdout)
+        self.assertFalse(data["configWritten"])
+        self.assertEqual(data["configPath"], str(primary_path.resolve()))
+        self.assertEqual(primary_path.read_text(encoding="utf-8"), original_text)
+
+
+class AdoptMalformedMarkersTests(unittest.TestCase):
+    """An unmatched or duplicated promise:begin marker must never delete
+    content. adopt.py refuses — exit 2, nothing written, the file left
+    byte-identical — rather than guessing which lines belong to the
+    managed block."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cwd = self._tmp.name
+        self.claude_md = Path(self.cwd) / "CLAUDE.md"
+
+    def _assert_refused(self, fixture_name: str, expected_line_fragment: str) -> None:
+        original = (FIXTURES_DIR / "hardening" / fixture_name).read_bytes()
+        self.claude_md.write_bytes(original)
+
+        result = run(ADOPT, "--cwd", self.cwd)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(self.claude_md.read_bytes(), original, "the file must stay byte-identical")
+        self.assertIn("promise:begin/end markers", result.stderr)
+        self.assertIn(expected_line_fragment, result.stderr)
+
+        data = json.loads(result.stdout)
+        self.assertFalse(data["changed"])
+        self.assertFalse(data["claudeMdWritten"])
+        self.assertFalse(data["configWritten"])
+        # nothing else gets written either, in the SAME invocation
+        self.assertFalse((Path(self.cwd) / ".claude" / "promise.config.json").exists())
+
+    def test_begin_without_end_is_refused(self) -> None:
+        self._assert_refused("markers-begin-no-end.md", "begin at line 5; end at line none")
+
+    def test_end_without_begin_is_refused(self) -> None:
+        self._assert_refused("markers-end-no-begin.md", "begin at line none; end at line 7")
+
+    def test_two_begins_is_refused(self) -> None:
+        self._assert_refused("markers-two-begins.md", "begin at line 3, 5; end at line 7")
+
+    def test_end_before_begin_is_refused(self) -> None:
+        self._assert_refused("markers-end-before-begin.md", "begin at line 7; end at line 3")
+
+    def test_reproduction_begin_no_end_survives_two_runs(self) -> None:
+        """The original failure mode: a begin marker with no end, then a
+        run, then a second run — which used to pair the orphan begin with
+        the END marker THAT FIRST RUN HAD JUST APPENDED, deleting
+        everything between them. Both runs now refuse instead."""
+        original = (
+            "# Project notes\n\nKeep this line.\n\n"
+            "<!-- promise:begin (managed by the promise skill; run /promise adopt to refresh it) -->\n"
+            "Important hand-written text that must survive.\n"
+        )
+        self.claude_md.write_text(original, encoding="utf-8")
+
+        first = run(ADOPT, "--cwd", self.cwd)
+        self.assertEqual(first.returncode, 2)
+        self.assertEqual(self.claude_md.read_text(encoding="utf-8"), original)
+
+        second = run(ADOPT, "--cwd", self.cwd)
+        self.assertEqual(second.returncode, 2)
+        after = self.claude_md.read_text(encoding="utf-8")
+        self.assertEqual(after, original)
+        self.assertIn("Keep this line.", after)
+        self.assertIn("Important hand-written text that must survive.", after)
+
+    def test_no_claude_md_flag_bypasses_the_check(self) -> None:
+        # A malformed file is only a problem for the file we would touch.
+        original = (FIXTURES_DIR / "hardening" / "markers-begin-no-end.md").read_bytes()
+        self.claude_md.write_bytes(original)
+
+        result = run(ADOPT, "--cwd", self.cwd, "--no-claude-md")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.claude_md.read_bytes(), original)
+        data = json.loads(result.stdout)
+        self.assertTrue(data["configWritten"])
+
+    def test_dry_run_also_refuses(self) -> None:
+        original = (FIXTURES_DIR / "hardening" / "markers-two-begins.md").read_bytes()
+        self.claude_md.write_bytes(original)
+
+        result = run(ADOPT, "--cwd", self.cwd, "--dry-run")
+        self.assertEqual(result.returncode, 2)
+        data = json.loads(result.stdout)
+        self.assertFalse(data["changed"])
+        self.assertEqual(self.claude_md.read_bytes(), original)
+
+
+class AdoptByteFidelityTests(unittest.TestCase):
+    """Byte fidelity and atomic writes: a UTF-8 BOM and the file's
+    dominant line ending survive a rewrite (inside the freshly rendered
+    block, not only around it), and every write goes through a temp file
+    plus os.replace, leaving nothing stray behind."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cwd = self._tmp.name
+        self.claude_md = Path(self.cwd) / "CLAUDE.md"
+
+    def test_bom_and_crlf_survive_a_fresh_insert(self) -> None:
+        text = "# Project notes\r\n\r\nKeep this line.\r\n"
+        self.claude_md.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
+
+        result = run(ADOPT, "--cwd", self.cwd)
+        data = json.loads(result.stdout)
+        self.assertTrue(data["claudeMdWritten"])
+
+        after = self.claude_md.read_bytes()
+        self.assertTrue(after.startswith(b"\xef\xbb\xbf"))
+        self.assertIn(b"<!-- promise:begin", after)
+        # every "\n" is part of a "\r\n" pair -- the inserted block is CRLF too
+        self.assertEqual(after.count(b"\n"), after.count(b"\r\n"))
+        self.assertIn(b"Keep this line.", after)
+
+    def test_bom_and_crlf_survive_a_replace_in_place(self) -> None:
+        before_block = "# Project notes\r\n\r\nKeep this line before.\r\n\r\n"
+        stale_block = (
+            "<!-- promise:begin (managed by the promise skill; run /promise adopt to refresh it) -->\r\n"
+            "stale rendered content from an older template\r\n"
+            "<!-- promise:end -->\r\n"
+        )
+        after_block = "\r\n## Trailer\r\n\r\nKeep this line after.\r\n"
+        original = before_block + stale_block + after_block
+        self.claude_md.write_bytes(b"\xef\xbb\xbf" + original.encode("utf-8"))
+
+        result = run(ADOPT, "--cwd", self.cwd)
+        data = json.loads(result.stdout)
+        self.assertTrue(data["claudeMdWritten"])
+
+        after = self.claude_md.read_bytes()
+        self.assertTrue(after.startswith(b"\xef\xbb\xbf" + before_block.encode("utf-8")))
+        self.assertTrue(after.endswith(after_block.encode("utf-8")))
+        self.assertEqual(after.count(b"\n"), after.count(b"\r\n"))
+        self.assertNotIn(b"stale rendered content from an older template", after)
+
+    def test_content_outside_markers_is_byte_identical_plain_lf(self) -> None:
+        before_block = "# Project notes\n\nKeep this line before.\n\n"
+        stale_block = (
+            "<!-- promise:begin (managed by the promise skill; run /promise adopt to refresh it) -->\n"
+            "stale rendered content from an older template\n"
+            "<!-- promise:end -->\n"
+        )
+        after_block = "\n## Trailer\n\nKeep this line after.\n"
+        original = before_block + stale_block + after_block
+        self.claude_md.write_text(original, encoding="utf-8")
+
+        run(ADOPT, "--cwd", self.cwd)
+
+        after = self.claude_md.read_bytes()
+        self.assertTrue(after.startswith(before_block.encode("utf-8")))
+        self.assertTrue(after.endswith(after_block.encode("utf-8")))
+
+    def test_no_bom_file_gets_no_bom(self) -> None:
+        self.claude_md.write_text("# Project notes\n\nKeep this.\n", encoding="utf-8")
+        run(ADOPT, "--cwd", self.cwd)
+        after = self.claude_md.read_bytes()
+        self.assertFalse(after.startswith(b"\xef\xbb\xbf"))
+
+    def test_no_stray_temp_files_left_behind(self) -> None:
+        run(ADOPT, "--cwd", self.cwd)
+        stray = [e for e in os.listdir(self.cwd) if e.startswith(".promise-adopt-")]
+        self.assertEqual(stray, [])
+        claude_dir = Path(self.cwd) / ".claude"
+        if claude_dir.is_dir():
+            stray_in_claude = [e for e in os.listdir(claude_dir) if e.startswith(".promise-adopt-")]
+            self.assertEqual(stray_in_claude, [])
+
+
+class OrientConfigValidationTests(unittest.TestCase):
+    """A malformed config value is a warning naming the key, never a
+    crash: the value is treated as absent (falling through to detection
+    where detection exists), and the raw config still comes back intact
+    under config.raw regardless of what config exposes at top level."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cwd = self._tmp.name
+
+    def test_docs_home_wrong_type_warns_and_falls_to_detection(self) -> None:
+        docs_dir = Path(self.cwd) / "docs" / "designs"
+        docs_dir.mkdir(parents=True)
+        write_config(self.cwd, {"docsHome": 42})
+        data = orientation_of(self.cwd)
+        self.assertEqual(data["docsHome"], "docs/designs")
+        self.assertEqual(data["docsHomeSource"], "detected")
+        self.assertTrue(any("docsHome is not a string" in w for w in data["warnings"]))
+        self.assertEqual(data["config"]["raw"]["docsHome"], 42)
+
+    def test_commands_wrong_type_warns_and_falls_to_detection(self) -> None:
+        write_config(self.cwd, {"commands": "run the tests please"})
+        data = orientation_of(self.cwd)
+        self.assertEqual(data["commands"]["source"], "none")
+        self.assertIsNone(data["commands"]["typeCheck"])
+        self.assertTrue(any("commands is not an object" in w for w in data["warnings"]))
+
+    def test_unknown_commands_key_warns_without_dropping_the_known_ones(self) -> None:
+        write_config(self.cwd, {"commands": {"typeCheck": "tsc", "bogus": "x"}})
+        data = orientation_of(self.cwd)
+        self.assertEqual(data["commands"]["typeCheck"], "tsc")
+        self.assertTrue(any("unknown commands key: bogus" in w for w in data["warnings"]))
+
+    def test_map_wrong_type_becomes_null(self) -> None:
+        write_config(self.cwd, {"map": "not an object"})
+        data = orientation_of(self.cwd)
+        self.assertIsNone(data["map"])
+        self.assertFalse(data["mapUsable"])
+        self.assertTrue(any("map is not an object" in w for w in data["warnings"]))
+
+    def test_map_lanes_wrong_type_warns(self) -> None:
+        write_config(
+            self.cwd,
+            {
+                "map": {
+                    "recipe": "docs/r.md", "find": "f", "row": "r",
+                    "lanes": ["not", "an", "object"],
+                }
+            },
+        )
+        data = orientation_of(self.cwd)
+        self.assertTrue(any("map.lanes is not an object of strings" in w for w in data["warnings"]))
+        self.assertFalse(data["mapUsable"])
+
+    def test_unknown_map_key_warns_but_does_not_block_usability(self) -> None:
+        write_config(
+            self.cwd,
+            {
+                "map": {
+                    "recipe": "docs/r.md", "find": "f", "row": "r",
+                    "lanes": {"data": "tests[]"}, "bogusKey": 1,
+                }
+            },
+        )
+        data = orientation_of(self.cwd)
+        self.assertTrue(any("unknown map key: bogusKey" in w for w in data["warnings"]))
+        self.assertTrue(data["mapUsable"])
+
+    def test_incomplete_map_keeps_the_object_and_flags_unusable(self) -> None:
+        write_config(self.cwd, {"map": {"recipe": "docs/r.md", "lanes": {"data": "tests[]"}}})
+        data = orientation_of(self.cwd)
+        self.assertEqual(data["map"], {"recipe": "docs/r.md", "lanes": {"data": "tests[]"}})
+        self.assertFalse(data["mapUsable"])
+        self.assertTrue(any("map incomplete: missing find, row" in w for w in data["warnings"]))
+
+    def test_complete_map_is_usable(self) -> None:
+        data = orientation_of(str(FIXTURES_DIR / "minirepo"))
+        self.assertTrue(data["mapUsable"])
+
+    def test_map_absent_is_not_usable(self) -> None:
+        data = orientation_of(self.cwd)
+        self.assertIsNone(data["map"])
+        self.assertFalse(data["mapUsable"])
+
+    def test_bad_row_id_pattern_warns_even_without_input_flag(self) -> None:
+        write_config(
+            self.cwd,
+            {
+                "map": {
+                    "recipe": "docs/r.md", "find": "f", "row": "r",
+                    "lanes": {"data": "tests[]"}, "rowIdPattern": "[unclosed(",
+                }
+            },
+        )
+        data = orientation_of(self.cwd)
+        self.assertTrue(any("map.rowIdPattern does not compile" in w for w in data["warnings"]))
+
+    def test_framework_path_missing_file_warns_and_falls_back(self) -> None:
+        write_config(self.cwd, {"frameworkPath": "docs/does-not-exist.md"})
+        data = orientation_of(self.cwd)
+        self.assertEqual(data["frameworkSource"], "bundled")
+        self.assertTrue(any("frameworkPath does not exist" in w for w in data["warnings"]))
+
+    def test_absolute_docs_home_warns_and_escapes(self) -> None:
+        write_config(self.cwd, {"docsHome": "/etc/passwd"})
+        data = orientation_of(self.cwd)
+        self.assertIsNone(data["docsHome"])
+        self.assertEqual(data["docsHomeSource"], "none")
+        self.assertTrue(any("path escapes the project: docsHome" in w for w in data["warnings"]))
+
+    def test_dot_dot_plans_folder_warns_and_escapes(self) -> None:
+        write_config(self.cwd, {"plansFolder": "../outside"})
+        data = orientation_of(self.cwd)
+        self.assertIsNone(data["plansFolder"])
+        self.assertTrue(any("path escapes the project: plansFolder" in w for w in data["warnings"]))
+
+    def test_absolute_framework_path_warns_and_falls_back(self) -> None:
+        write_config(self.cwd, {"frameworkPath": "/etc/passwd"})
+        data = orientation_of(self.cwd)
+        self.assertEqual(data["frameworkSource"], "bundled")
+        self.assertTrue(any("path escapes the project: frameworkPath" in w for w in data["warnings"]))
+
+    def test_garbage_config_values_never_traceback(self) -> None:
+        write_config(
+            self.cwd,
+            {
+                "docsHome": [1, 2, 3],
+                "commands": [1, 2],
+                "map": 123,
+                "plansFolder": {"a": 1},
+                "frameworkPath": True,
+            },
+        )
+        result = run(ORIENT, "--cwd", self.cwd)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        data = json.loads(result.stdout)
+        self.assertIsNone(data["map"])
+        self.assertFalse(data["mapUsable"])
+        self.assertIsNone(data["docsHome"])
+        self.assertIsNone(data["plansFolder"])
+        self.assertEqual(data["frameworkSource"], "bundled")
 
 
 class SecondTableInAcceptance(unittest.TestCase):

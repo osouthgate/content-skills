@@ -1,5 +1,6 @@
-Read before this: references/altitude.md · references/anti-rationalizations.md · the project's `map.recipe` and `map.index` if configured
-Phase 0 line: mode `reconcile` (say if inferred), what shipped (PR / branch / commit / test file / claim), whether a map is configured, and whether the project is adopted.
+Read before this: references/altitude.md · references/anti-rationalizations.md
+Read at Apply, not before: the project's `map.recipe` and `map.index`, if a map is configured.
+Phase 0 line: mode `reconcile` (say if inferred), framework source, docs home and its source, what shipped (PR / branch / commit / test file / claim), whether a map is configured, and whether the project is adopted.
 Writes: per the recipe's lockstep files when a map is configured (a dated finding, the evidence array, a kill witness); else the outcome doc's §0 tags, `Scenarios:` count and a dated §8 entry.
 
 # Reconcile — the work shipped; now update the promise
@@ -22,12 +23,12 @@ the row, not evidence for it, until you have seen it fail under a named mutation
 
 There is no direct lookup by file. Take the union of three probes:
 
-1. `map.find` with what a person can now do, in their own words.
+1. `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" find "<what a person can now do, in their own words>"`.
 2. Grep the map for a file the work touched.
 3. Grep the touched test files for the project's own test-declaration marker
    (whatever the recipe calls it).
 
-Then `map.row` on every candidate, and **read the finding to the end** — a row with
+Then `adapter.py row <id>` on every candidate, and **read the finding to the end** — a row with
 declared-but-uncited test files is usually the answer. Nothing matches → this is a
 NEW-ROW item; go to `modes/intake.md`.
 
@@ -88,8 +89,8 @@ dated §8 entry — and the mode says so in its Phase 0 line.
 
 ## Verify and hand back
 
-Run `map.checks`, then `python3 "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py"
-<doc>`. Hand back what moved, what did not and why, and a reading assignment — the
+Run `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" checks`, then
+`python3 "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py" <doc>`. Hand back what moved, what did not and why, and a reading assignment — the
 1–3 `file:line` spots the user should read to own the verdict, one question each.
 
 ## What this mode refuses to do

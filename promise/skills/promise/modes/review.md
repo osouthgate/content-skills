@@ -1,5 +1,5 @@
 Read before this: references/anti-rationalizations.md · outcome-framework.md § The framework as a review rubric · § Section rules
-Phase 0 line: mode `review` (say if inferred), framework source (the rubric's authority), and whether the project is adopted.
+Phase 0 line: mode `review` (say if inferred), framework source (the rubric's authority), docs home and its source, whether a map is configured, and whether the project is adopted.
 Writes: nothing in the repo, unless the user asks for a file copy. Findings are delivered inline in chat.
 
 # Review — a doc authored elsewhere
@@ -8,7 +8,9 @@ The framework doubles as a review rubric — framework § The framework as a
 review rubric is the authority; run it from the section, not from memory.
 
 1. **Read 100% of the source** — chunked if large. State what fraction you
-   read if you couldn't finish. Never review a skim.
+   read if you couldn't finish. Never review a skim. A URL is readable only
+   when the session has a fetch tool; otherwise ask for a paste. Never review
+   from memory of what a page probably says.
 2. **Verify before critiquing.** Spot-check every load-bearing
    current-state claim against live code, with file:line. Three outcome
    classes, all valuable: confirmed (say so — it builds the doc's

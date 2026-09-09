@@ -4,10 +4,19 @@
     python3 lint_outcome.py doc.md
     python3 lint_outcome.py docs/designs --json
     python3 lint_outcome.py doc.md --strict
+    python3 lint_outcome.py doc.md --template
 
 Checks the rules in references/architecture.md SS9 against the Outcome
-Framework template shape (SS0 TLDR budget and fields, rule format and
-tags, headings, the acceptance table, the Why lines, placeholders).
+Framework template shape: SS0 TLDR budget and non-empty fields, rule
+bullet format and tags, headings, the SS6 acceptance table (rule id
+ACCEPTANCE_TABLE: a qualifying header, at least one data row, non-empty
+Given/When/Then cells), the Why lines, and placeholder text (rule id
+PLACEHOLDER: TBD/TODO/etc markers plus any angle-bracket ``<...>`` run
+in SS0, in the header ``Owner:``/``Last decision:`` values, or in a SS6
+data cell). ``--template`` exempts angle-bracket placeholders and the
+literal ``YYYY-MM-DD`` so the bundled template itself can be linted;
+every other rule stays active under it. A path that cannot be read as
+UTF-8 text reports one UNREADABLE finding for itself instead of raising.
 Exit 0 when there are no findings, 1 when there are findings (errors,
 or warnings too under --strict), 2 on a usage error. Human output is
 one line per finding: ``<path>:<line>: <RULE_ID> <message>``. ``--json``
@@ -52,6 +61,7 @@ VALID_STATUS_TOKENS = {"draft", "agreed", "building", "shipped", "superseded-by"
 WHY_SECTIONS = (4, 5, 6, 7)
 
 PLACEHOLDER_TERMS = ("tbd", "todo", "<fill", "decide later")
+TEMPLATE_DATE_PLACEHOLDER = "YYYY-MM-DD"
 
 HEADING_RE = re.compile(r"^## (\d+)\.\s*(.*?)\s*$")
 ANY_HEADING_RE = re.compile(r"^## \d+\.")
@@ -69,6 +79,7 @@ SCENARIOS_RE = re.compile(
 NOTE_START_RE = re.compile(r"^(\d+)\.\s+")
 H3_RE = re.compile(r"^###\s+\S")
 BOLD_LED_RE = re.compile(r"^\*\*[^*]+\*\*")
+ANGLE_PLACEHOLDER_RE = re.compile(r"<[^<>]+>")
 
 
 def read_text_tolerant(path: str) -> str:
@@ -123,6 +134,42 @@ def get_status(lines: List[str]) -> Optional[str]:
     return STATUS_RE.match(lines[idx]).group(1)
 
 
+def parse_header_field_value(
+    lines: List[str], idx: int, marker: str, other_marker: Optional[str] = None
+) -> str:
+    """The text on ``lines[idx]`` after ``marker``.
+
+    Stops before ``other_marker`` when it also appears later on the same
+    line (so ``Owner:``'s value does not swallow a same-line
+    ``Last decision:``); otherwise runs to the end of the line. Empty when
+    ``marker`` is not actually on that line.
+    """
+    line = lines[idx]
+    pos = line.find(marker)
+    if pos == -1:
+        return ""
+    value = line[pos + len(marker):]
+    if other_marker:
+        other_pos = value.find(other_marker)
+        if other_pos != -1:
+            value = value[:other_pos]
+    return value.strip()
+
+
+def _rules_block_bounds(lines: List[str]) -> Tuple[Optional[int], Optional[int]]:
+    """0-indexed (rules_idx, how_idx) bracketing the SS0 rules block.
+
+    ``rules_idx`` is the ``**Rules:**`` line, or None when it is absent.
+    ``how_idx`` is the following ``**How we'll know:**`` line, or None when
+    there is none after it.
+    """
+    rules_idx = find_line_index(lines, lambda l: "**Rules:**" in l)
+    if rules_idx is None:
+        return None, None
+    how_idx = find_line_index(lines, lambda l: "**How we'll know:**" in l, start=rules_idx + 1)
+    return rules_idx, how_idx
+
+
 def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[int], Optional[int]]:
     """Parse the SS0 rules between **Rules:** and **How we'll know:**.
 
@@ -130,13 +177,14 @@ def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[
     ``{"start_line": 1-based, "format": "bullet"|"numbered", "raw_text": str,
     "tags": [...] or None}``. Continuation lines (indented, not starting a
     new ``- `` or ``N.`` item) are joined onto the currently open rule
-    before the trailing tag is checked. Returns ([], None, None) when the
-    **Rules:** anchor is absent.
+    before the trailing tag is checked. A non-blank line that is neither a
+    bullet, a numbered item, nor an indented continuation is excluded here
+    entirely — ``check_rules_format`` reports it as a stray line. Returns
+    ([], None, None) when the **Rules:** anchor is absent.
     """
-    rules_idx = find_line_index(lines, lambda l: "**Rules:**" in l)
+    rules_idx, how_idx = _rules_block_bounds(lines)
     if rules_idx is None:
         return [], None, None
-    how_idx = find_line_index(lines, lambda l: "**How we'll know:**" in l, start=rules_idx + 1)
     end = how_idx if how_idx is not None else len(lines)
 
     records: List[Dict[str, Any]] = []
@@ -154,9 +202,12 @@ def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[
         elif m_numbered:
             current = {"start_line": i + 1, "format": "numbered", "parts": [m_numbered.group(2).rstrip()]}
             records.append(current)
-        elif current is not None:
+        elif current is not None and raw_line[:1].isspace():
             current["parts"].append(raw_line.strip())
-        # else: stray text before any rule has started; not part of any rule.
+        else:
+            # Stray text: not a bullet/numbered start, and not an indented
+            # continuation of the rule before it (or nothing is open).
+            current = None
 
     for record in records:
         record["raw_text"] = " ".join(record.pop("parts")).strip()
@@ -171,6 +222,32 @@ def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[
             record["tags"] = None
             record["text"] = record["raw_text"]
     return records, rules_idx, how_idx
+
+
+def find_stray_rule_lines(lines: List[str]) -> List[int]:
+    """1-based line numbers in the SS0 rules block that are neither a
+    ``- `` bullet, a numbered item, nor an indented continuation of the
+    line before them. Empty when the **Rules:** anchor is absent."""
+    rules_idx, how_idx = _rules_block_bounds(lines)
+    if rules_idx is None:
+        return []
+    end = how_idx if how_idx is not None else len(lines)
+
+    stray: List[int] = []
+    open_rule = False
+    for i in range(rules_idx + 1, end):
+        raw_line = lines[i]
+        if not raw_line.strip():
+            open_rule = False
+            continue
+        if BULLET_START_RE.match(raw_line) or NUMBERED_START_RE.match(raw_line):
+            open_rule = True
+            continue
+        if open_rule and raw_line[:1].isspace():
+            continue
+        stray.append(i + 1)
+        open_rule = False
+    return stray
 
 
 ACCEPTANCE_HEADER_RE = re.compile(r"^(#|id|at)$", re.IGNORECASE)
@@ -219,6 +296,32 @@ def parse_table_data_rows(lines: List[str], start: int, end: int) -> List[Tuple[
     return out
 
 
+def find_acceptance_tables(
+    lines: List[str], start: int, end: int
+) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]]]]:
+    """Tables in [start, end) that qualify as SS6's acceptance table.
+
+    A table qualifies when its header's first cell is ``#``/``ID``/``AT``
+    (case-insensitive, matching ``parse_table_data_rows``) *and* the header
+    has 4 or 5 cells (``Given``, ``When``, ``Then``, optional ``Row``). A
+    first-cell match at the wrong width does not qualify — ACCEPTANCE_TABLE
+    reports it the same as no table at all. Returns a list of
+    (header_line, header_cells, data_rows), each already separator-stripped.
+    """
+    found = []
+    for table in split_tables(lines, start, end):
+        header_line, header_cells = table[0]
+        if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
+            continue
+        if len(header_cells) not in (4, 5):
+            continue
+        body = table[1:]
+        if body and is_separator(body[0][1]):
+            body = body[1:]
+        found.append((header_line, header_cells, body))
+    return found
+
+
 def parse_acceptance_rows(lines: List[str]) -> List[Dict[str, Any]]:
     """Well-formed SS6 rows (id, given, when, then, row) keyed on ``AT-\\d+``."""
     bounds = section_bounds(lines, 6)
@@ -246,12 +349,14 @@ def parse_acceptance_rows(lines: List[str]) -> List[Dict[str, Any]]:
     return rows
 
 
-def parse_signal(lines: List[str]) -> str:
-    """The **How we'll know:** text, with wrapped continuation lines joined."""
-    idx = find_line_index(lines, lambda l: "**How we'll know:**" in l)
+def parse_bold_field_value(lines: List[str], marker: str) -> str:
+    """The text after a ``**Field:**`` marker, with wrapped continuation
+    lines joined. Continuation stops at a blank line, the next bold field,
+    or a ``- `` bullet — whichever comes first. Empty when ``marker`` is
+    not found in ``lines`` at all."""
+    idx = find_line_index(lines, lambda l: marker in l)
     if idx is None:
         return ""
-    marker = "**How we'll know:**"
     pos = lines[idx].find(marker)
     parts = [lines[idx][pos + len(marker):].strip()]
     i = idx + 1
@@ -263,6 +368,11 @@ def parse_signal(lines: List[str]) -> str:
         parts.append(stripped)
         i += 1
     return " ".join(p for p in parts if p).strip()
+
+
+def parse_signal(lines: List[str]) -> str:
+    """The **How we'll know:** text, with wrapped continuation lines joined."""
+    return parse_bold_field_value(lines, "**How we'll know:**")
 
 
 def worked_examples(lines: List[str]) -> Tuple[List[Tuple[int, int]], Optional[str]]:
@@ -295,13 +405,23 @@ def check_header_status(lines: List[str]) -> List[Dict[str, Any]]:
     idx = find_line_index(lines, lambda l: STATUS_RE.match(l) is not None)
     if idx is None:
         return [finding("HEADER_STATUS", 1, "missing a 'Status:' line", "error")]
-    token = STATUS_RE.match(lines[idx]).group(1)
+    match = STATUS_RE.match(lines[idx])
+    token = match.group(1)
     if token not in VALID_STATUS_TOKENS:
         return [
             finding(
                 "HEADER_STATUS",
                 idx + 1,
                 f"Status: token {token!r} is not one of draft, agreed, building, shipped, superseded-by",
+                "error",
+            )
+        ]
+    if token == "superseded-by" and not lines[idx][match.end():].strip():
+        return [
+            finding(
+                "HEADER_STATUS",
+                idx + 1,
+                "Status: superseded-by must name a target",
                 "error",
             )
         ]
@@ -313,6 +433,9 @@ def check_header_owner(lines: List[str]) -> List[Dict[str, Any]]:
     owner_idx = find_line_index(lines, lambda l: "Owner:" in l)
     if owner_idx is None:
         out.append(finding("HEADER_OWNER", 1, "missing an 'Owner:' field", "error"))
+    elif not parse_header_field_value(lines, owner_idx, "Owner:", "Last decision:"):
+        out.append(finding("HEADER_OWNER", owner_idx + 1, "'Owner:' value is empty", "error"))
+
     last_decision_idx = find_line_index(lines, lambda l: "Last decision:" in l)
     if last_decision_idx is None:
         out.append(
@@ -322,6 +445,10 @@ def check_header_owner(lines: List[str]) -> List[Dict[str, Any]]:
                 "missing a 'Last decision:' field",
                 "error",
             )
+        )
+    elif not parse_header_field_value(lines, last_decision_idx, "Last decision:"):
+        out.append(
+            finding("HEADER_OWNER", last_decision_idx + 1, "'Last decision:' value is empty", "error")
         )
     return out
 
@@ -362,21 +489,24 @@ def check_headings_bare(lines: List[str]) -> List[Dict[str, Any]]:
     for n in range(0, 11):
         expected = f"{n}. {SECTION_NAMES[n]}"
         entries = by_number.get(n, [])
+        if not entries:
+            out.append(finding("HEADINGS_BARE", 1, f"missing heading '## {expected}'", "error"))
+            continue
+        # Every malformed heading fires, whether or not a well-formed one for
+        # the same number also exists — a valid heading must never mask a
+        # malformed duplicate.
         good = [e for e in entries if e[1] == SECTION_NAMES[n]]
-        if not good:
-            if entries:
-                line_no, actual = entries[0]
-                out.append(
-                    finding(
-                        "HEADINGS_BARE",
-                        line_no,
-                        f"heading must read exactly '## {expected}' (found '## {n}. {actual}')",
-                        "error",
-                    )
+        bad = [e for e in entries if e[1] != SECTION_NAMES[n]]
+        for line_no, actual in bad:
+            out.append(
+                finding(
+                    "HEADINGS_BARE",
+                    line_no,
+                    f"heading must read exactly '## {expected}' (found '## {n}. {actual}')",
+                    "error",
                 )
-            else:
-                out.append(finding("HEADINGS_BARE", 1, f"missing heading '## {expected}'", "error"))
-        elif len(good) > 1:
+            )
+        if len(good) > 1:
             out.append(
                 finding(
                     "HEADINGS_BARE",
@@ -411,11 +541,24 @@ def check_tldr_fields(lines: List[str]) -> List[Dict[str, Any]]:
     if bounds is None:
         return []
     start, end = bounds
-    block_text = " ".join(lines[start:end])
+    block_lines = lines[start:end]
+    block_text = " ".join(block_lines)
     out = []
     for field in ("**Outcome:**", "**Rules:**", "**How we'll know:**", "**Scenarios:**"):
         if field not in block_text:
             out.append(finding("TLDR_FIELDS", start + 1, f"SS0 is missing {field}", "error"))
+
+    # A field that IS present must still carry a value — text on the marker's
+    # own line, or on indented/plain continuation lines before the next bold
+    # field. **Rules:** and **Scenarios:** have their own dedicated shape
+    # rules (RULES_FORMAT/RULES_TAGGED, SCENARIOS_COUNT) so only the two
+    # freeform fields are checked for emptiness here.
+    for field in ("**Outcome:**", "**How we'll know:**"):
+        if field not in block_text:
+            continue
+        if not parse_bold_field_value(block_lines, field):
+            rel_idx = find_line_index(block_lines, lambda l, field=field: field in l)
+            out.append(finding("TLDR_FIELDS", start + rel_idx + 1, f"{field} has no value", "error"))
     return out
 
 
@@ -423,11 +566,21 @@ def check_rules_format(lines: List[str]) -> List[Dict[str, Any]]:
     records, rules_idx, _ = parse_rules_block(lines)
     if rules_idx is None:
         return []
-    return [
+    out = [
         finding("RULES_FORMAT", r["start_line"], "rule must be a '- ' bullet, not numbered", "error")
         for r in records
         if r["format"] == "numbered"
     ]
+    out.extend(
+        finding("RULES_FORMAT", line_no, "text in the rules block is not a rule bullet", "error")
+        for line_no in find_stray_rule_lines(lines)
+    )
+    out.extend(
+        finding("RULES_FORMAT", r["start_line"], "rule bullet has no text before its tag", "error")
+        for r in records
+        if r["format"] == "bullet" and r["tags"] is not None and not r["text"]
+    )
+    return out
 
 
 def check_rules_tagged(lines: List[str]) -> List[Dict[str, Any]]:
@@ -488,6 +641,58 @@ def check_at_ids_unique(lines: List[str]) -> List[Dict[str, Any]]:
             out.append(finding("AT_IDS_UNIQUE", line_no, f"duplicate SS6 row id {row_id}", "error"))
         else:
             seen[row_id] = line_no
+    return out
+
+
+def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
+    bounds = section_bounds(lines, 6)
+    if bounds is None:
+        # HEADINGS_BARE already reports a missing "## 6." heading.
+        return []
+    start, end = bounds
+    tables = find_acceptance_tables(lines, start + 1, end)
+    if not tables:
+        return [
+            finding(
+                "ACCEPTANCE_TABLE",
+                start + 1,
+                "SS6 has no acceptance table (need a header whose first cell is "
+                "'#', 'ID' or 'AT', with 4 or 5 columns)",
+                "error",
+            )
+        ]
+
+    out: List[Dict[str, Any]] = []
+    total_rows = 0
+    cell_names = ("Given", "When", "Then")
+    for header_line, header_cells, body in tables:
+        width = len(header_cells)
+        for line_no, cells in body:
+            total_rows += 1
+            if len(cells) != width:
+                out.append(
+                    finding(
+                        "ACCEPTANCE_TABLE",
+                        line_no,
+                        f"acceptance table row has {len(cells)} cells, expected {width}",
+                        "error",
+                    )
+                )
+                continue
+            for offset, name in enumerate(cell_names, start=1):
+                if not cells[offset].strip():
+                    out.append(
+                        finding(
+                            "ACCEPTANCE_TABLE",
+                            line_no,
+                            f"acceptance table row's {name} cell is empty",
+                            "error",
+                        )
+                    )
+    if total_rows == 0:
+        out.append(
+            finding("ACCEPTANCE_TABLE", tables[0][0], "acceptance table has no data rows", "error")
+        )
     return out
 
 
@@ -583,19 +788,83 @@ def check_untested_on_agreed(lines: List[str]) -> List[Dict[str, Any]]:
     ]
 
 
-def check_placeholder(lines: List[str]) -> List[Dict[str, Any]]:
-    bounds = tldr_block_bounds(lines)
-    if bounds is None:
-        return []
-    start, end = bounds
+def check_placeholder(lines: List[str], template: bool = False) -> List[Dict[str, Any]]:
+    """TBD/TODO-style terms, plus angle-bracket ``<...>`` placeholders, in SS0,
+    the header ``Owner:``/``Last decision:`` values, and SS6 data cells.
+
+    ``template=True`` exempts angle-bracket placeholders and the literal
+    ``YYYY-MM-DD`` (the bundled template's own placeholder shapes) so the
+    template can be linted in template mode; the TBD/TODO-style terms stay
+    active either way.
+    """
+    out: List[Dict[str, Any]] = []
     seen_terms = set()
-    out = []
-    for i in range(start, end):
-        lowered = lines[i].lower()
-        for term in PLACEHOLDER_TERMS:
-            if term in lowered and term not in seen_terms:
-                seen_terms.add(term)
-                out.append(finding("PLACEHOLDER", i + 1, f"placeholder text {term!r} found in SS0", "error"))
+
+    bounds = tldr_block_bounds(lines)
+    if bounds is not None:
+        start, end = bounds
+        for i in range(start, end):
+            lowered = lines[i].lower()
+            for term in PLACEHOLDER_TERMS:
+                if term in lowered and term not in seen_terms:
+                    seen_terms.add(term)
+                    out.append(finding("PLACEHOLDER", i + 1, f"placeholder text {term!r} found in SS0", "error"))
+            if not template:
+                for m in ANGLE_PLACEHOLDER_RE.finditer(lines[i]):
+                    out.append(
+                        finding("PLACEHOLDER", i + 1, f"placeholder {m.group(0)!r} found in SS0", "error")
+                    )
+
+    if not template:
+        owner_idx = find_line_index(lines, lambda l: "Owner:" in l)
+        if owner_idx is not None:
+            value = parse_header_field_value(lines, owner_idx, "Owner:", "Last decision:")
+            for m in ANGLE_PLACEHOLDER_RE.finditer(value):
+                out.append(
+                    finding(
+                        "PLACEHOLDER",
+                        owner_idx + 1,
+                        f"placeholder {m.group(0)!r} found in the header 'Owner:' value",
+                        "error",
+                    )
+                )
+
+        last_decision_idx = find_line_index(lines, lambda l: "Last decision:" in l)
+        if last_decision_idx is not None:
+            value = parse_header_field_value(lines, last_decision_idx, "Last decision:")
+            for m in ANGLE_PLACEHOLDER_RE.finditer(value):
+                out.append(
+                    finding(
+                        "PLACEHOLDER",
+                        last_decision_idx + 1,
+                        f"placeholder {m.group(0)!r} found in the header 'Last decision:' value",
+                        "error",
+                    )
+                )
+            if value == TEMPLATE_DATE_PLACEHOLDER:
+                out.append(
+                    finding(
+                        "PLACEHOLDER",
+                        last_decision_idx + 1,
+                        f"placeholder {TEMPLATE_DATE_PLACEHOLDER!r} found in the header 'Last decision:' value",
+                        "error",
+                    )
+                )
+
+        bounds6 = section_bounds(lines, 6)
+        if bounds6 is not None:
+            start6, end6 = bounds6
+            for line_no, cells in parse_table_data_rows(lines, start6 + 1, end6):
+                for cell in cells:
+                    for m in ANGLE_PLACEHOLDER_RE.finditer(cell):
+                        out.append(
+                            finding(
+                                "PLACEHOLDER",
+                                line_no,
+                                f"placeholder {m.group(0)!r} found in an SS6 data cell",
+                                "error",
+                            )
+                        )
     return out
 
 
@@ -659,19 +928,20 @@ RULE_CHECKS = (
     check_rules_tagged,
     check_tags_resolve,
     check_at_ids_unique,
+    check_acceptance_table,
     check_scenarios_count,
     check_why_line,
     check_untested_on_agreed,
-    check_placeholder,
     check_agent_notes_many,
     check_human_half_budget,
 )
 
 
-def lint_lines(lines: List[str], strict: bool) -> List[Dict[str, Any]]:
+def lint_lines(lines: List[str], strict: bool, template: bool = False) -> List[Dict[str, Any]]:
     findings: List[Dict[str, Any]] = []
     for check in RULE_CHECKS:
         findings.extend(check(lines))
+    findings.extend(check_placeholder(lines, template))
     if strict:
         for f in findings:
             if f["severity"] == "warn":
@@ -680,10 +950,14 @@ def lint_lines(lines: List[str], strict: bool) -> List[Dict[str, Any]]:
     return findings
 
 
-def lint_file(path: str, strict: bool) -> Dict[str, Any]:
-    text = read_text_tolerant(path)
+def lint_file(path: str, strict: bool, template: bool = False) -> Dict[str, Any]:
+    try:
+        text = read_text_tolerant(path)
+    except (OSError, UnicodeDecodeError) as exc:
+        findings = [finding("UNREADABLE", None, f"cannot read {path}: {exc}", "error")]
+        return {"path": path, "findings": findings, "stats": {"errors": 1, "warnings": 0, "total": 1}}
     lines = text.splitlines()
-    findings = lint_lines(lines, strict)
+    findings = lint_lines(lines, strict, template)
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     return {
@@ -694,10 +968,16 @@ def lint_file(path: str, strict: bool) -> Dict[str, Any]:
 
 
 def contains_tldr(path: str) -> bool:
+    """True when ``path`` is UTF-8 text containing the SS0 TLDR heading.
+
+    A file that cannot be read or decoded also counts as True: a directory
+    scan surfaces a broken doc as an UNREADABLE finding (via ``lint_file``)
+    rather than silently excluding it from the scan.
+    """
     try:
         text = read_text_tolerant(path)
-    except OSError:
-        return False
+    except (OSError, UnicodeDecodeError):
+        return True
     return any(line.startswith(TLDR_HEADING) for line in text.splitlines())
 
 
@@ -733,6 +1013,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("path", help="a doc.md, or a directory to scan one level deep")
     parser.add_argument("--json", action="store_true", help="print findings as JSON")
     parser.add_argument("--strict", action="store_true", help="promote warn findings to error")
+    parser.add_argument(
+        "--template",
+        action="store_true",
+        help="exempt angle-bracket and literal YYYY-MM-DD placeholders, for linting the bundled template",
+    )
     args = parser.parse_args(argv)
 
     if not os.path.exists(args.path):
@@ -747,11 +1032,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"lint_outcome.py: not a file or directory: {args.path}", file=sys.stderr)
         return 2
 
-    try:
-        results = [lint_file(p, args.strict) for p in doc_paths]
-    except OSError as exc:
-        print(f"lint_outcome.py: {exc}", file=sys.stderr)
-        return 2
+    # Every path is read inside lint_file, which turns an unreadable file or
+    # a decoding failure into an UNREADABLE finding rather than raising, so
+    # nothing here needs to guard against that.
+    results = [lint_file(p, args.strict, args.template) for p in doc_paths]
 
     # Exit 1 only for error-severity findings. --strict has already
     # promoted warn to error in place (inside lint_lines) by this point,

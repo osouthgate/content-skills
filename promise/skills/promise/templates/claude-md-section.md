@@ -5,7 +5,8 @@
 - One doc per capability lives in `{docsHome}`, in the Outcome Framework shape
   (`{frameworkPath}`).
 - §0 is the human's verbatim block. An agent only appends numbered notes below it.
-- `Status:` moves forward only by a human.
+- `Status:` reaches `agreed` and `shipped` only by a human's hand; `building` only
+  after the human approves the red-test commit.
 - A capability map, once configured in `{configPath}`, is the source of scenarios
   after a doc is `agreed`. A verdict moves only when evidence reaches the altitude
   the row's own `Then` claims.

@@ -1,5 +1,5 @@
-Read before this: references/slates.md · references/anti-rationalizations.md · templates/outcome-doc.md · outcome-framework.md § The contract · § Lifecycle
-Phase 0 line: mode `merge` (say if inferred), docs home, `plansFolder` (or "none"), whether a map is configured, and whether the project is adopted.
+Read before this: references/slates.md · references/anti-rationalizations.md · outcome-framework.md § The contract · § Lifecycle
+Phase 0 line: mode `merge` (say if inferred), framework source, docs home and its source, `plansFolder` (or "none"), whether a map is configured, and whether the project is adopted.
 Writes: the survivor doc under `docsHome`; deletes the folded docs once the user says yes.
 
 # Merge — consolidating overlapping docs

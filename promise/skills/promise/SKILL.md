@@ -66,6 +66,13 @@ State, in one line, what Phase 0 resolved: mode (and that it was inferred,
 if it was), framework source, docs home and its source, whether a map is
 configured, and whether the project is adopted.
 
+Configured commands never run as composed shell strings. Every `map.find`,
+`map.row`, `map.nextId`, `map.checks` and verify command runs through
+`python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py"`, which passes the user's
+text as one argument. When a map is configured, print
+`adapter.py show` once per session so the person sees exactly which
+repository-supplied commands this skill will run before any of them runs.
+
 `adopted: false` → offer `adopt` once per session, **(Recommended)**, with
 one reason: every agent and person in the repo gets routed here instead of
 writing a design, plan or spec doc by hand. Continue with the requested mode
@@ -114,11 +121,14 @@ prints them from the resolved framework; `--list` shows every section.
 - The user's edit enters the doc, not the candidate it started from.
 - Verify before believing: a current-state claim carries `file:line` read
   this run, not remembered from an earlier one.
-- This skill never flips `Status:` forward — that is a human act, always.
-- Every close-out pastes §0 inline, verbatim, and says what it could not
-  check.
+- `agreed` and `shipped` are typed by a human, never by this skill. `building` is the
+  one exception: `arm` writes it, and only after the human has seen the red gate
+  commit and said yes — the commit is the human act the status records.
+- Every mode that writes a doc closes out by pasting §0 inline, verbatim; every
+  mode states its own close-out and says what it could not check.
 - Never require syntax. A mode word is a shortcut; the input decides.
   `/promise fix the doc` gets `revise`, not a usage message.
 
-Read `references/anti-rationalizations.md` before any mode above — it is
-required reading, not optional background.
+Read `references/anti-rationalizations.md` before any mode that writes — new,
+revise, merge, arm, intake, reconcile. It is required reading there, not
+optional background.

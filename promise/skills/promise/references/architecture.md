@@ -113,8 +113,8 @@ SKILL.md runs, at load time or as its first action:
 python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" [--mode <mode>] [--cwd <path>]
 ```
 
-`orient.py` never fails hard. It prints one JSON object to stdout and exits 0; problems go
-in `warnings[]`. When `python3` itself is absent, the router names the host's one-line
+`orient.py` never fails hard on a valid invocation. It prints one JSON object to stdout and
+exits 0; problems go in `warnings[]`. A usage error (an unknown flag) exits 2 like any CLI. When `python3` itself is absent, the router names the host's one-line
 install and continues by applying the scripts' rules by hand for that run; a second
 implementation in another language is refused (S5), because two implementations of one
 rule set drift and then the same doc passes in one project and fails in another. Schema (every key always present; `null` when unknown):
@@ -134,8 +134,10 @@ rule set drift and then the same doc passes in one project and fails in another.
   "map": { "…the config.map object verbatim, or null…" },
   "claudeMd": { "path": "/abs/CLAUDE.md or null", "hasPromiseSection": false },
   "adopted": false,
+  "mapUsable": false,
   "suggestedMode": "revise or null — from --input, see below",
   "signals": [ "matches existing doc 'Foo' + a change verb" ],
+  "ambiguous": false,
   "existingDocs": [ { "path": "docs/designs/foo.md", "title": "Foo", "status": "draft", "lastDecision": "YYYY-MM-DD" } ],
   "warnings": [ "no config found at .claude/promise.config.json; using detection" ]
 }
@@ -163,7 +165,11 @@ Detection rules when config is absent:
   `existingDocs` title or path plus a critique or change verb, two doc matches, a PR or
   commit or test-file pattern, a `map.rowIdPattern` match, a list of complaints, an
   adopt phrase — and name the rule that fired. Without the flag both are `null` / `[]`.
-  It is a hint the router confirms in its one-line statement, never a decision.
+  `ambiguous` is true only when two rules for different modes both matched; then the router
+  asks. It is a hint the router confirms in its one-line statement, never a decision.
+- **mapUsable**: true only when `map` carries `recipe`, `find`, `row` and `lanes` with the
+  right types; an incomplete map stays in `map` with a warning naming the missing keys, and
+  the modes treat it as not configured.
 
 The mode file states, in one line, what Phase 0 resolved: mode (and that it was inferred,
 if it was), framework source, docs home and its source, whether a map is configured, and
@@ -243,17 +249,18 @@ Semantics the mode files rely on:
 | Doc status | Without a map | With a map |
 |---|---|---|
 | `draft` | Doc is the only home. §6 rows are the promise. | Same. Nothing is filed in the map yet. |
-| `agreed` (human act) | — | `arm` files each §6 row as a **not-built row** per the recipe. A person groups AT rows into rows by their "so that" (one row = one story, 1–5 scenarios; more is a chain with a parent). §6 gains a `Row` column. §0 tags keep AT aliases. |
+| `agreed` (human act) | — | `arm` files each §6 row as a **not-built row** per the recipe. A person groups AT rows into rows **by the §0 rule each row is tagged from** — a rule is the promise at story grain — one row = one story, 1–5 scenarios; more is a chain with a parent; rows no rule cites are one group the person places. §6 gains a `Row` column and a snapshot line, and is not edited again: it is the record of what was agreed, the map is the live source. §0 tags keep AT aliases. A staleness check between the two is planned (§14). |
 | `building` | Red tests written and committed first; failing output pasted in §6; sha in header. | Same, plus each red test is cited in the lane its altitude picks. |
 | `shipped` | Human flips it when §6 rows are green. | Human flips it when **every** bridged row is `proven` at its `Then`'s altitude. `reconcile` is how rows get there. Doc keeps §0, §2, §4 as the living record. |
 
-The doc's `Status:` is typed by a human. This skill never flips it forward; `revise`
-states when a §0 change would drop it back to `draft`.
+`agreed` and `shipped` are typed by a human. `building` is written by `arm`, only after
+the human has seen the red-gate commit and confirmed it — the commit is the human act
+the status records. `revise` states when a §0 change would drop a doc back to `draft`.
 
 ## 9. `lint_outcome.py` — what it checks
 
 ```
-python3 "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py" <doc.md | directory> [--json] [--strict]
+python3 "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py" <doc.md | directory> [--json] [--strict] [--template]
 ```
 
 Exit 0 when no error-severity findings; exit 1 when any error (or, under `--strict`, any
@@ -265,24 +272,28 @@ parseable value. A directory lints every `*.md` containing `## 0. TLDR`.
 
 | Rule id | Checks | Severity |
 |---|---|---|
-| `HEADER_STATUS` | A `Status:` line exists and its first token is one of `draft` `agreed` `building` `shipped` `superseded-by`. Text after the token is allowed. | error |
-| `HEADER_OWNER` | `Owner:` and `Last decision:` present. | error |
+| `HEADER_STATUS` | A `Status:` line exists and its first token is one of `draft` `agreed` `building` `shipped` `superseded-by`; `superseded-by` names a target. Other text after the token is allowed. | error |
+| `HEADER_OWNER` | `Owner:` and `Last decision:` present, with non-empty values. | error |
 | `CONTENTS_LINE` | A `Contents:` line exists and links to all eleven anchors `#0-tldr` … `#10-out-of-scope`. | error |
 | `HEADINGS_BARE` | Exactly one `## <n>. <Name>` per n in 0..10, matching the template's names, with nothing after the name on that line. | error |
 | `TLDR_BUDGET` | Lines from `## 0. TLDR` up to (not including) the `Agent notes` line — or `## 1.` if there are none — number ≤ 40. Report the count. | error |
-| `TLDR_FIELDS` | The block contains `**Outcome:**`, `**Rules:**`, `**How we'll know:**`, `**Scenarios:**`. | error |
-| `RULES_FORMAT` | Every rule is a `- ` bullet. Numbered rules (`1.`) are a finding. | error |
+| `TLDR_FIELDS` | The block contains `**Outcome:**`, `**Rules:**`, `**How we'll know:**`, `**Scenarios:**`, and the Outcome and How-we'll-know values are non-empty. | error |
+| `RULES_FORMAT` | Every rule is a `- ` bullet with text before its tag. Numbered rules, and any other non-blank text in the rules block, are findings. | error |
 | `RULES_TAGGED` | Every rule ends with `→ AT-n[, AT-m…]` or `→ UNTESTED`. | error |
 | `TAGS_RESOLVE` | Every `AT-n` cited in a §0 tag exists as a row id in §6. | error |
 | `AT_IDS_UNIQUE` | §6 row ids are unique and match `AT-\d+`. | error |
+| `ACCEPTANCE_TABLE` | §6 holds at least one acceptance table — header first cell `#`, `ID` or `AT`, four or five columns — with at least one data row; every data row has the right cell count and non-empty Given, When and Then. Other tables in §6 are ignored. | error |
 | `SCENARIOS_COUNT` | The `**Scenarios:**` line's acceptance-row count equals the number of §6 rows. The worked-example count is checked only if §3 examples are parseable (`### ` or bold-led blocks); otherwise `warn` that it was not checked. | error / warn |
 | `WHY_LINE` | §4, §5, §6, §7 each contain a line beginning `Why — what breaks without it:`. | error |
 | `UNTESTED_ON_AGREED` | A rule tagged `UNTESTED` while `Status:` is `agreed`, `building` or `shipped`. | error |
-| `PLACEHOLDER` | `TBD`, `TODO`, `<fill`, `…decide later` inside §0. | error |
+| `PLACEHOLDER` | `TBD`, `TODO`, `<fill`, `decide later` inside §0; any `<…>` placeholder in §0, in the `Owner:` / `Last decision:` values, or in a §6 data cell; a literal `YYYY-MM-DD`. `--template` exempts the angle-bracket and date placeholders so the bundled template can be linted; every other rule stays active. A copied, unfilled template therefore fails a normal lint. | error |
+| `UNREADABLE` | The path cannot be read or is not valid UTF-8 — one finding for the file, never a traceback. | error |
 | `AGENT_NOTES_MANY` | More than 8 numbered agent notes under §0. | warn |
 | `HUMAN_HALF_BUDGET` | §0 through the end of §2 plus the first §3 example ≤ 150 lines (measured to the end of §2 when §3 is not parseable; say so). | warn |
 
-`--strict` promotes `warn` to `error`. The lint is deterministic and needs no network.
+`--strict` promotes `warn` to `error`. `HEADINGS_BARE` fires on a malformed heading even when a
+well-formed heading for the same number also exists. The lint is deterministic and needs no
+network.
 
 ## 10. `outcome_rows.py` — the bridge's input
 
@@ -292,7 +303,9 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/outcome_rows.py" <doc.md> [--json]
 
 Prints `{"path", "status", "rules": [{"index", "text", "tags": ["AT-1", …] | ["UNTESTED"]}],
 "rows": [{"id": "AT-1", "given", "when", "then", "row": "C207" | null}], "signal": "…"}`.
-`row` is the optional `Row` column (§8). Human output is a compact table. This is what
+`row` is the optional `Row` column (§8). A rule with no tag at all yields `tags: []`, which
+the lint reports as `RULES_TAGGED`; the script extracts, it does not judge. Human output is
+a compact table. This is what
 `arm` reads to file rows and what `reconcile` reads to re-stamp tags. Two more flags:
 `--write-counts` rewrites only the `**Scenarios:**` line from the real §6 row count (and
 the §3 example count when countable), idempotently — the count is agent-maintained
@@ -369,3 +382,25 @@ The `adopt` mode confirms the docs home and the config contents with the user
 (Recommended-first, scores), runs the script, then runs `orient.py` and shows `adopted` is
 now true. Every other mode offers `adopt` once per session when Phase 0 reports the project
 is not adopted, and continues with the requested mode either way.
+
+## 14. Scripts that exist, and scripts that are planned
+
+Shipped: `orient.py`, `lint_outcome.py`, `outcome_rows.py`, `adopt.py`,
+`framework_section.py`, `adapter.py` (runs every configured command with the user's text
+as one argument — never a composed shell string), `render_outcome.py` (instantiates the
+template; refuses to overwrite).
+
+Planned, in the order they pay back. Each replaces a step a mode currently performs by
+reading prose, so drift is the cost of not having it:
+
+| Script | Replaces | Used by |
+|---|---|---|
+| `inspect_outcome.py DOC` | status, BLOCKING count, lint result, §0 text, note count, UNTESTED rules, counts, Row references — one JSON for every close-out | new, revise, review, arm, reconcile |
+| `diff_outcome.py BEFORE AFTER` | the three erosion classes and status movement, as a diff the model then judges | revise, review, merge |
+| `bridge_validate.py DOC` | Row ids against `rowIdPattern`, every AT row mapped, the §6 snapshot against the map's current scenarios | arm, reconcile |
+| `evidence_probe.py --ref PR\|SHA\|BRANCH\|FILE` | changed files, declared row ids, cited and uncited test titles, ranked candidates | reconcile, intake |
+| `kill_witness.py --test … --mutation …` | clean-tree check, apply the approved mutation, capture the named failure, restore exactly, rerun green, print the witness | intake, reconcile |
+| `arm_gate.py DOC --branch SLUG` | the Git preflight, the red run, staged-path inspection, the explicit-path commit | arm |
+| `issue_search.py --tracker … --row … --text …` | open and closed duplicate candidates before any issue is filed | intake, reconcile |
+| `feedback_items.py INPUT` | numbering already-structured items and flagging compound sentences; the split stays a judgement | intake |
+| `inventory.py --docs-home DIR --query TEXT` | §0 rules, §5 claims and §6 rows across docs, exact duplicates, ranked overlaps | new, merge |

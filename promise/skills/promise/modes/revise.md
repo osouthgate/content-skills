@@ -1,5 +1,5 @@
-Read before this: references/slates.md · references/anti-rationalizations.md · outcome-framework.md § The contract · § Section rules
-Phase 0 line: mode `revise` (say if inferred), the doc's current path and `Status:`, framework source, whether a map is configured, and whether the project is adopted.
+Read before this: references/slates.md · references/anti-rationalizations.md · outcome-framework.md § The contract · § Section rules · § The framework as a review rubric
+Phase 0 line: mode `revise` (say if inferred), framework source, docs home and its source, the doc's current path and `Status:`, whether a map is configured, and whether the project is adopted.
 Writes: the existing doc named in the input, in place.
 
 # Revise — evolving an existing outcome doc

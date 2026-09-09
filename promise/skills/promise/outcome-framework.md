@@ -285,8 +285,10 @@ any ──► superseded-by <doc>   (and the superseded doc is DELETED)
 
 - **Where the project keeps a capability map, `agreed` is also the bridge**
   (architecture § The bridge). A human groups the confirmed §6 rows into the map's
-  rows — one row per story, 1–5 scenarios; more is a chain with a parent — and from
-  then on the map is the source of the scenarios, not §6. §6 gains a `Row` column
+  rows by the §0 rule each row is tagged from — one row per story, 1–5 scenarios;
+  more is a chain with a parent — and from then on the map is the source of the
+  scenarios. §6 stays as a snapshot taken at `agreed`, marked as such under the
+  table, and is not edited again. §6 gains a `Row` column
   citing the map's row id; §0's tags keep citing the doc-local `AT-n` aliases, which
   stay stable and append-only rather than being replaced by the map's own ids.
   `shipped` requires every bridged row **proven** at the altitude its own `Then`

@@ -1,5 +1,5 @@
 Read before this: references/config.md
-Phase 0 line: mode `adopt`, `claudeMd.path` and `hasPromiseSection`, whether a config is loaded (and from where), and `adopted`.
+Phase 0 line: mode `adopt` (say if inferred), framework source, docs home and its source, `claudeMd.path` and `hasPromiseSection`, whether a config is loaded (and from where), whether a map is configured, and `adopted`.
 Writes: `.claude/promise.config.json` (only if absent) and the `<!-- promise:begin -->…<!-- promise:end -->` section of `CLAUDE.md` (created if absent, else replaced in place) — both only through `scripts/adopt.py`, never by hand.
 
 # Adopt — route the project through `/promise`

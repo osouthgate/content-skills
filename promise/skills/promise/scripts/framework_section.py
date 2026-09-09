@@ -21,11 +21,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 
 
-def resolve_framework(cwd: Path, explicit: str | None) -> Path:
+def resolve_framework(cwd: Path, explicit: Optional[str]) -> Path:
     if explicit:
         return Path(explicit).expanduser().resolve()
     for rel in (".claude/promise.config.json", "promise.config.json"):
@@ -42,12 +43,12 @@ def resolve_framework(cwd: Path, explicit: str | None) -> Path:
     return SKILL_DIR / "outcome-framework.md"
 
 
-def split_sections(text: str) -> list[tuple[str, int, int, list[str]]]:
+def split_sections(text: str) -> List[Tuple[str, int, int, List[str]]]:
     """Return (name, start_line, end_line, lines) per top-level section, 1-based inclusive."""
     lines = text.splitlines()
-    sections: list[tuple[str, int, int, list[str]]] = []
+    sections: List[Tuple[str, int, int, List[str]]] = []
     in_fence = False
-    current: tuple[str, int] | None = None
+    current: Optional[Tuple[str, int]] = None
     for i, line in enumerate(lines, 1):
         stripped = line.lstrip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -61,7 +62,7 @@ def split_sections(text: str) -> list[tuple[str, int, int, list[str]]]:
     return sections
 
 
-def find(name: str, sections: list[tuple[str, int, int, list[str]]]):
+def find(name: str, sections: List[Tuple[str, int, int, List[str]]]):
     key = name.strip().lower().lstrip("§").strip()
     exact = [s for s in sections if s[0].lower() == key]
     if len(exact) == 1:
@@ -74,7 +75,7 @@ def find(name: str, sections: list[tuple[str, int, int, list[str]]]):
     return None, f"{name!r} is ambiguous: " + ", ".join(repr(s[0]) for s in prefix)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("names", nargs="*", help="section names, e.g. 'The contract' 'Lifecycle'")
     ap.add_argument("--cwd", default=".", help="project root used to find a config (default: .)")
@@ -96,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name:45s} lines {start:4d}-{end:4d}  ~{approx:5d} tokens")
         return 0 if args.list else 2
 
-    out: list[str] = []
+    out: List[str] = []
     for name in args.names:
         hit, err = find(name, sections)
         if err:

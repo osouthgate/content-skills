@@ -1,5 +1,6 @@
-Read before this: references/altitude.md · references/anti-rationalizations.md · the project's `map.recipe` and `map.index` if configured
-Phase 0 line: mode `intake` (say if inferred), the item count, whether the input is a feedback list, a single "add a scenario to `<row>`" ask, or a "which promise covers X" lookup (then run only the match step and answer), whether a map is configured, and whether the project is adopted.
+Read before this: references/altitude.md · references/anti-rationalizations.md
+Read at Apply, not before: the project's `map.recipe` and `map.index`, if a map is configured — the match and route steps need only the adapter's output.
+Phase 0 line: mode `intake` (say if inferred), framework source, docs home and its source, the item count, whether the input is a feedback list, a single "add a scenario to `<row>`" ask, or a "which promise covers X" lookup (then run only the match step and answer), whether a map is configured, and whether the project is adopted.
 Writes: per the recipe when a map is configured; else the outcome docs' §6 (Acceptance) and §9 (Open questions).
 
 # Intake — feedback in, promise changes out
@@ -43,11 +44,13 @@ A sentence carrying two claims is two items. Do not paraphrase in this table.
 
 For every item, in this order:
 
-1. Run `map.find` with the verbatim item; read the top 3–5 results, not only the
-   first. A rank is where to start reading, not a match.
-2. Read each plausible candidate in full with `map.row` — the story, the scenarios,
-   the verdict, every evidence array. **Read the finding to the end**; the lede is
-   the oldest claim.
+1. Run `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" find "<the verbatim item>"`;
+   read the top 3–5 results, not only the first. A rank is where to start reading,
+   not a match. The adapter passes the item as one argument — never paste it into
+   a shell command yourself.
+2. Read each plausible candidate in full with `adapter.py row <id>` — the story,
+   the scenarios, the verdict, every evidence array. **Read the finding to the
+   end**; the lede is the oldest claim.
 3. No map → `python3 "${CLAUDE_SKILL_DIR}/scripts/outcome_rows.py" --search "<the
    verbatim item>" --dir <docsHome>` ranks every §6 row and §0 rule across the
    outcome docs; read the top hits in their docs before deciding.
@@ -55,7 +58,8 @@ For every item, in this order:
 
    | Relation | Meaning |
    |---|---|
-   | EXISTING-SCENARIO | A scenario already promises this `Then` |
+   | EXISTING-SCENARIO | A scenario already promises this `Then`, and the product honours it → nothing to file beyond the paraphrase; check the row's verdict |
+   | DEFECT | A scenario already promises this `Then`, and the product breaks it → an issue on the existing row, no new scenario |
    | EXTEND | Same story, new observable `Then` → a new scenario on that row |
    | NEW-ROW | No row states the need — a new "so that" |
    | SURFACE | Only about the screen — a placement, a wording, a colour |
@@ -125,10 +129,21 @@ Per relation:
   accepted-uncovered exemption — or it is not must yet.
 - **SURFACE** and **DECISION** — per the recipe's own shape for each.
 
+No map — the same relations land in the docs instead, and only there:
+
+| Relation | Where it goes |
+|---|---|
+| EXISTING-SCENARIO | nothing to file; note the paraphrase in the row's §9 answer or §8 entry if it sharpens the promise |
+| DEFECT | a dated §8 entry naming the AT row broken, plus a §9 question (BLOCKING if the doc is `agreed` or later) — the human decides whether the doc drops back to `draft` |
+| EXTEND | a new AT row appended to §6 of the doc whose story holds it; §0's tag for the rule it serves is re-stamped; `Scenarios:` re-counted |
+| NEW-ROW | a new outcome doc through the `new` procedure — never a row bolted onto a doc with a different story |
+| SURFACE | a line in §10 (out of scope) naming the doc that owns the surface, or a §9 non-blocking note when none does |
+| DECISION | a §9 question with an owner and a BLOCKING flag |
+
 ## Verify and hand back
 
-Run `map.checks` in order, then the project's `commands.typeCheck` /
-`commands.test` / `commands.lint`.
+Run `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" checks`, then `adapter.py verify`
+(the project's type-check, test and lint commands, in that order).
 
 Report per item: what was filed, where, what proves it now, and what is still owed
 (a missing lane, a decision, a kill witness). Close with a reading assignment — the

@@ -135,7 +135,7 @@ class Templates(unittest.TestCase):
 
     def test_template_passes_the_lint(self) -> None:
         proc = subprocess.run(
-            [sys.executable, str(SKILL / "scripts" / "lint_outcome.py"), str(SKILL / "templates" / "outcome-doc.md")],
+            [sys.executable, str(SKILL / "scripts" / "lint_outcome.py"), "--template", str(SKILL / "templates" / "outcome-doc.md")],
             capture_output=True, text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, f"template has lint findings:\n{proc.stdout}{proc.stderr}")

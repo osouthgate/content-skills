@@ -186,8 +186,11 @@ class SuggestModeRuleTests(unittest.TestCase):
             result = run(ORIENT, "--cwd", tmp, "--input", "add this as a scenario to C207a")
         self.assertEqual(result.returncode, 0, result.stderr)
         data = json.loads(result.stdout)
-        # rule 7 is skipped, not crashed past: falls through to the rule-10 default.
-        self.assertEqual(data["suggestedMode"], "new")
+        # rule 7 is skipped, not crashed past. The phrase "add this as a scenario" is one of
+        # the dispatch table's intake phrasings, so the phrase rule still lands on intake —
+        # by wording, not by the row id the broken pattern could not check.
+        self.assertEqual(data["suggestedMode"], "intake")
+        self.assertFalse(any("rowIdPattern" in s for s in data["signals"]), data["signals"])
         self.assertTrue(
             any("rowIdPattern" in w and "skipping rule 7" in w for w in data["warnings"]),
             data["warnings"],
@@ -229,6 +232,337 @@ class SuggestModeRuleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         self.assertEqual(data["suggestedMode"], "new")
+
+
+class SuggestModeTableRegressionTests(unittest.TestCase):
+    """One assertion per example phrase in SKILL.md's Modes table (the
+    same table architecture.md SS4 carries), with the minimal
+    existingDocs/config context each phrase's own row describes it
+    needing. Four of these were misses, fixed alongside this test: a
+    generic change verb aimed at an unnamed doc, a critique verb with no
+    doc match at all, an adopt phrase with no "promise" in it, and a bare
+    ticket number with no accompanying shipped/landed/PR word."""
+
+    # --- new: "an idea, ticket, transcript or braindump... and nothing
+    # below matches" ---
+
+    def test_new_design_this(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "design this")
+        self.assertEqual(data["suggestedMode"], "new")
+
+    def test_new_plan_this(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "plan this")
+        self.assertEqual(data["suggestedMode"], "new")
+
+    def test_new_spec_this(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "spec this")
+        self.assertEqual(data["suggestedMode"], "new")
+
+    def test_new_write_a_doc_for_x(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "write a doc for the sidebar widget")
+        self.assertEqual(data["suggestedMode"], "new")
+
+    def test_new_how_should_we_build_x(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "how should we build the sidebar widget")
+        self.assertEqual(data["suggestedMode"], "new")
+
+    # --- revise: "a path to, or the title of, an existing outcome doc
+    # plus a change" ---
+
+    def test_revise_update_with_named_doc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "update the Foo widget")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    def test_revise_add_a_rule_with_named_doc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "add a rule to the Foo widget doc")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    def test_revise_change_the_outcome_with_named_doc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "change the outcome for Foo widget")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    def test_revise_the_signal_is_wrong_with_named_doc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "the signal is wrong on the Foo widget doc")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    def test_revise_tighten_section_with_named_doc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "tighten section 5 of Foo widget")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    # --- revise (fixed miss): a generic change verb aimed at "the doc" /
+    # "the outcome", no title named — at least one doc means revise even
+    # though which doc is unnamed. ---
+
+    def test_revise_fix_the_doc_no_title_named(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "fix the doc")
+        self.assertEqual(data["suggestedMode"], "revise")
+        self.assertTrue(any("generic change verb" in s for s in data["signals"]))
+
+    def test_revise_update_the_doc_no_title_named(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "update the doc")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    def test_revise_change_the_outcome_no_title_named(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "change the outcome")
+        self.assertEqual(data["suggestedMode"], "revise")
+
+    def test_revise_generic_verb_two_docs_flags_which_doc_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(
+                tmp,
+                [
+                    {"filename": "foo.md", "title": "Foo widget", "status": "draft"},
+                    {"filename": "bar.md", "title": "Bar widget", "status": "draft"},
+                ],
+            )
+            data = orient_with_input(tmp, "update the doc")
+        self.assertEqual(data["suggestedMode"], "revise")
+        self.assertTrue(any("ambiguous: which doc" in s for s in data["signals"]))
+
+    # --- review: "a substantial doc, URL or paste authored elsewhere plus
+    # a critique verb" (fixed miss: no doc match at all — pasted/external
+    # content never had a rule of its own before) ---
+
+    def test_review_please_review_this_pasted_design(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "please review this pasted design")
+        self.assertEqual(data["suggestedMode"], "review")
+
+    def test_review_critique_with_no_doc_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "please critique this pasted design")
+        self.assertEqual(data["suggestedMode"], "review")
+
+    def test_review_is_this_any_good(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "is this any good")
+        self.assertEqual(data["suggestedMode"], "review")
+
+    def test_review_check_this_against_the_framework(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "check this against the framework")
+        self.assertEqual(data["suggestedMode"], "review")
+
+    # --- merge: "two or more doc paths or titles" ---
+
+    def test_merge_fold_these(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(
+                tmp,
+                [
+                    {"filename": "foo.md", "title": "Foo widget", "status": "draft"},
+                    {"filename": "bar.md", "title": "Bar widget", "status": "draft"},
+                ],
+            )
+            data = orient_with_input(tmp, "fold these together: Foo widget and Bar widget")
+        self.assertEqual(data["suggestedMode"], "merge")
+
+    def test_merge_consolidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(
+                tmp,
+                [
+                    {"filename": "foo.md", "title": "Foo widget", "status": "draft"},
+                    {"filename": "bar.md", "title": "Bar widget", "status": "draft"},
+                ],
+            )
+            data = orient_with_input(tmp, "consolidate Foo widget and Bar widget")
+        self.assertEqual(data["suggestedMode"], "merge")
+
+    # --- arm: "an agreed doc plus" one of five phrases ---
+
+    def test_arm_start_building(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "agreed"}])
+            data = orient_with_input(tmp, "Foo widget, start building")
+        self.assertEqual(data["suggestedMode"], "arm")
+
+    def test_arm_arm_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "agreed"}])
+            data = orient_with_input(tmp, "Foo widget, arm it")
+        self.assertEqual(data["suggestedMode"], "arm")
+
+    def test_arm_write_the_red_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "agreed"}])
+            data = orient_with_input(tmp, "Foo widget, write the red tests")
+        self.assertEqual(data["suggestedMode"], "arm")
+
+    def test_arm_file_the_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "agreed"}])
+            data = orient_with_input(tmp, "Foo widget, file the rows")
+        self.assertEqual(data["suggestedMode"], "arm")
+
+    def test_arm_kick_off_the_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "agreed"}])
+            data = orient_with_input(tmp, "Foo widget, kick off the build")
+        self.assertEqual(data["suggestedMode"], "arm")
+
+    # --- intake: "a list of complaints, wishes, bug reports or feedback
+    # about the product", or "add this as a scenario to <row>" ---
+
+    def test_intake_wishes_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "here is a list of wishes from the last call")
+        self.assertEqual(data["suggestedMode"], "intake")
+
+    def test_intake_bug_reports_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "triaging some bug reports from support")
+        self.assertEqual(data["suggestedMode"], "intake")
+
+    def test_intake_add_this_as_a_scenario_to_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [], row_id_pattern=r"^C\d+[a-z]?$")
+            data = orient_with_input(tmp, "add this as a scenario to C207a")
+        self.assertEqual(data["suggestedMode"], "intake")
+
+    # --- reconcile: "a PR number, branch, commit or test file" or a
+    # shipped/landed phrase (fixed miss: a bare ticket number, alone, is
+    # not enough) ---
+
+    def test_reconcile_we_shipped_x(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "we shipped the widget last week")
+        self.assertEqual(data["suggestedMode"], "reconcile")
+
+    def test_reconcile_we_already_do_this(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "we already do this")
+        self.assertEqual(data["suggestedMode"], "reconcile")
+
+    def test_reconcile_isnt_x_covered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "isn't the widget covered already")
+        self.assertEqual(data["suggestedMode"], "reconcile")
+
+    def test_reconcile_update_the_map_now_that_y_landed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "update the map now that this landed")
+        self.assertEqual(data["suggestedMode"], "reconcile")
+
+    def test_reconcile_pr_number_with_shipped_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "we already shipped this in PR #42")
+        self.assertEqual(data["suggestedMode"], "reconcile")
+
+    def test_reconcile_bare_ticket_number_with_design_words_stays_new(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "let's design a plan for #42")
+        self.assertEqual(data["suggestedMode"], "new")
+        self.assertTrue(any("ticket reference" in s for s in data["signals"]))
+
+    def test_reconcile_bare_ticket_number_alone_stays_new(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "see #42")
+        self.assertEqual(data["suggestedMode"], "new")
+        self.assertTrue(any("ticket reference" in s for s in data["signals"]))
+
+    # --- adopt: "set this project up", "install / configure promise
+    # here", "add promise to CLAUDE.md" (fixed miss: an install/setup
+    # verb aimed at this project with no "promise" word at all) ---
+
+    def test_adopt_set_this_project_up(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "set this project up")
+        self.assertEqual(data["suggestedMode"], "adopt")
+
+    def test_adopt_install_promise_here(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "install promise here")
+        self.assertEqual(data["suggestedMode"], "adopt")
+
+    def test_adopt_configure_promise_here(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "configure promise here")
+        self.assertEqual(data["suggestedMode"], "adopt")
+
+    def test_adopt_add_promise_to_claude_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "add promise to CLAUDE.md")
+        self.assertEqual(data["suggestedMode"], "adopt")
+
+    def test_adopt_install_it_here_no_promise_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "install it here")
+        self.assertEqual(data["suggestedMode"], "adopt")
+
+    def test_adopt_configure_it_here_no_promise_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "configure it here")
+        self.assertEqual(data["suggestedMode"], "adopt")
+
+
+class SuggestModeAmbiguousKeyTests(unittest.TestCase):
+    """The new "ambiguous" key: true only when a lower-priority rule also
+    matched with a different mode than the winner, listing that rule's
+    own signal alongside the winner's. False for every single-rule match
+    — including the doc-level "which doc" ambiguity, which is noted only
+    as a signal string on the (unambiguous) revise mode, never as this
+    key."""
+
+    def test_false_when_only_one_rule_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "let's design a new widget for the sidebar")
+        self.assertFalse(data["ambiguous"])
+
+    def test_false_for_a_recognised_first_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, "revise the widget doc please")
+        self.assertFalse(data["ambiguous"])
+
+    def test_false_for_which_doc_ambiguity_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(
+                tmp,
+                [
+                    {"filename": "foo.md", "title": "Foo widget", "status": "draft"},
+                    {"filename": "bar.md", "title": "Bar widget", "status": "draft"},
+                ],
+            )
+            data = orient_with_input(tmp, "update the doc")
+        self.assertEqual(data["suggestedMode"], "revise")
+        self.assertFalse(data["ambiguous"])
+
+    def test_true_when_a_lower_priority_rule_matches_a_different_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            make_project(tmp, [{"filename": "foo.md", "title": "Foo widget", "status": "draft"}])
+            data = orient_with_input(tmp, "update the Foo widget doc, ref PR #42 which shipped")
+        self.assertEqual(data["suggestedMode"], "revise")
+        self.assertTrue(data["ambiguous"])
+        self.assertTrue(any("Foo widget" in s for s in data["signals"]))
+        self.assertTrue(any("#42" in s for s in data["signals"]))
+
+    def test_key_always_present_and_boolean_when_flag_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = orient_with_input(tmp, None)
+        self.assertIn("ambiguous", data)
+        self.assertIsInstance(data["ambiguous"], bool)
+        self.assertFalse(data["ambiguous"])
 
 
 # ---------------------------------------------------------------------------
