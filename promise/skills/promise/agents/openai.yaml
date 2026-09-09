@@ -1,0 +1,4 @@
+interface:
+  display_name: "Promise"
+  short_description: "Carry a capability from an outcome doc to proven rows: new, revise, review, merge, arm, intake, reconcile, adopt"
+  default_prompt: "Use $promise and say what you want in plain words; the mode is inferred."

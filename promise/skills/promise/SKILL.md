@@ -43,6 +43,14 @@ doc's acceptance rows are filed there as rows, and `intake`/`reconcile` read
 and write the map, not a second copy inside the doc. No map configured →
 the doc stays the only home, always.
 
+## Other hosts
+
+This file follows the shared SKILL.md standard, so Codex and Cursor read it too. Three
+things below are Claude Code notation; translate them on other hosts: `${CLAUDE_SKILL_DIR}`
+is the directory containing this file; `$ARGUMENTS` is the user's whole message and `$0`
+its first word; a `!` block is a command the host runs at load time — if it did not run,
+run that command by hand as the first action.
+
 ## Phase 0 — orient
 
 !`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" --mode "$0" --input "$ARGUMENTS"`
