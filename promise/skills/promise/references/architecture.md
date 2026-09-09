@@ -252,7 +252,7 @@ Semantics the mode files rely on:
 | Doc status | Without a map | With a map |
 |---|---|---|
 | `draft` | Doc is the only home. §6 rows are the promise. | Same. Nothing is filed in the map yet. |
-| `agreed` (human act) | — | `arm` files each §6 row as a **not-built row** per the recipe. A person groups AT rows into rows **by the §0 rule each row is tagged from** — a rule is the promise at story grain — one row = one story, 1–5 scenarios; more is a chain with a parent; rows no rule cites are one group the person places. §6 gains a `Row` column and a snapshot line, and is not edited again: it is the record of what was agreed, the map is the live source. §0 tags keep AT aliases. A staleness check between the two is planned (§14). |
+| `agreed` (human act) | — | `arm` files each §6 row as a **not-built row** per the recipe. A person groups AT rows into rows **by the §0 rule each row is tagged from** — a rule is the promise at story grain — one row = one story, 1–5 scenarios; more is a chain with a parent; rows no rule cites are one group the person places. §6 gains a `Row` column and a snapshot line, and is not edited again: it is the record of what was agreed, the map is the live source. §0 tags keep AT aliases. `bridge_validate.py` (§10) is the staleness check between the two: Row ids against `rowIdPattern`, every AT row mapped, the snapshot line present, and each row's `Then` against the map's current text. |
 | `building` | Red tests written and committed first; failing output pasted in §6; sha in header. | Same, plus each red test is cited in the lane its altitude picks. |
 | `shipped` | Human flips it when §6 rows are green. | Human flips it when **every** bridged row is `proven` at its `Then`'s altitude. `reconcile` is how rows get there. Doc keeps §0, §2, §4 as the living record. |
 
@@ -314,6 +314,41 @@ a compact table. This is what
 the §3 example count when countable), idempotently — the count is agent-maintained
 metadata, so a script may own it; `--search "<text>" --dir <docsHome>` ranks every §6 row
 and §0 rule across the docs by token overlap — intake's matcher when no map is configured.
+
+### `bridge_validate.py` — the bridge's check
+
+```
+python3 "${CLAUDE_SKILL_DIR}/scripts/bridge_validate.py" <doc.md> [--cwd <path>] [--json] [--strict]
+```
+
+Checks a bridged doc's §6 against the project's map. Config is resolved exactly as
+`orient.py`/`adapter.py` do, under `--cwd`. Every `map.row` lookup runs through
+`adapter.py --json row <id>` rather than a shell string composed from configuration
+plus doc content, so a row id — however it is spelled — always travels as one argv
+element.
+
+| Rule id | Checks | Severity |
+|---|---|---|
+| `UNREADABLE` | DOC is missing or not valid UTF-8. | error |
+| `MAP_NOT_CONFIGURED` | No `map` in the config, or no config at all — nothing to validate against. | error |
+| `NOT_BRIDGED` | `Status:` is `draft` or `superseded-by` — the bridge has not happened. Reports `bridged: false`; no other rule runs. | info |
+| `ROW_MISSING` | An AT row's `Row` cell is empty while `Status:` is `agreed`, `building` or `shipped`. | error |
+| `ROW_ID_FORMAT` | A `Row` value does not match `map.rowIdPattern`. | error |
+| `NO_ROW_ID_PATTERN` | `map.rowIdPattern` is not configured; `ROW_ID_FORMAT` is skipped. | warn |
+| `ROW_NOT_FOUND` | `map.row` is configured and `adapter.py row <id>` reports a non-zero exit or empty stdout. | error |
+| `NO_MAP_ROW_COMMAND` | `map.row` is not configured; the drift check against the map is skipped. | warn |
+| `SNAPSHOT_LINE_MISSING` | §6 has no line starting `Snapshot taken at` (a leading backtick or asterisk tolerated). | error |
+| `THEN_NOT_IN_MAP` | A row's normalised `Then` is not a substring of its `Row` id's normalised current text in the map. | warn |
+
+`--strict` promotes every warn to error. Exit 0 with no error-severity finding; 1 with
+any error (or, under `--strict`, any warning); 2 on a usage error. Human output is one
+line per finding, then a summary line `bridge: <n> rows, <m> mapped, <k> drifted`.
+`--json` prints one object: `{"path", "status", "bridged", "mapConfigured", "rows":
+[{"id", "row", "line", "found", "inSync"}], "findings": [{"rule", "line", "message",
+"severity"}], "stats": {"rows", "mapped", "drifted", "errors", "warnings"}}`. `arm` runs
+it once the `Row` column and snapshot line are written, and fixes every error before
+continuing; `reconcile` runs it before reading the map, because a `THEN_NOT_IN_MAP`
+finding means §6 no longer says what the map says.
 
 ## 11. Rules for every file in this skill
 
@@ -391,7 +426,8 @@ is not adopted, and continues with the requested mode either way.
 Shipped: `orient.py`, `lint_outcome.py`, `outcome_rows.py`, `adopt.py`,
 `framework_section.py`, `adapter.py` (runs every configured command with the user's text
 as one argument — never a composed shell string), `render_outcome.py` (instantiates the
-template; refuses to overwrite).
+template; refuses to overwrite), `bridge_validate.py` (§10: checks a bridged doc's §6
+Row ids, snapshot line and `Then` text against the project's current map).
 
 Planned, in the order they pay back. Each replaces a step a mode currently performs by
 reading prose, so drift is the cost of not having it:
@@ -400,7 +436,6 @@ reading prose, so drift is the cost of not having it:
 |---|---|---|
 | `inspect_outcome.py DOC` | status, BLOCKING count, lint result, §0 text, note count, UNTESTED rules, counts, Row references — one JSON for every close-out | new, revise, review, arm, reconcile |
 | `diff_outcome.py BEFORE AFTER` | the three erosion classes and status movement, as a diff the model then judges | revise, review, merge |
-| `bridge_validate.py DOC` | Row ids against `rowIdPattern`, every AT row mapped, the §6 snapshot against the map's current scenarios | arm, reconcile |
 | `evidence_probe.py --ref PR\|SHA\|BRANCH\|FILE` | changed files, declared row ids, cited and uncited test titles, ranked candidates | reconcile, intake |
 | `kill_witness.py --test … --mutation …` | clean-tree check, apply the approved mutation, capture the named failure, restore exactly, rerun green, print the witness | intake, reconcile |
 | `arm_gate.py DOC --branch SLUG` | the Git preflight, the red run, staged-path inspection, the explicit-path commit | arm |

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0
+
+`bridge_validate.py` closes the gap between a bridged doc's §6 and the capability
+map it cites: Row ids against `rowIdPattern`, every AT row mapped, the snapshot
+line present, and each row's `Then` against the map's current text — read through
+`adapter.py`, so a row id always travels as one argv element, never a shell string
+composed from configuration plus doc content. `arm` runs it once the `Row` column
+and snapshot line are written, and fixes every error before continuing; `reconcile`
+runs it before reading the map, because a drift finding means §6 no longer says
+what the map says.
+
+`lint_outcome.py` gains `BUILDING_NEEDS_GATE`: a `building` doc's header must carry
+the red-gate commit sha that `arm` records there as `Red gate: <sha> <YYYY-MM-DD>`,
+so the status stays traceable to the act that earned it. A new test locks the wider
+rule this is one piece of: `agreed` and `shipped` are typed by a human, never by
+this skill; `building` is the one exception, written only after the human confirms
+the red gate.
+
 ## 1.0.0
 
 First release. Supersedes the `outcome` plugin, which stays in this repository for one

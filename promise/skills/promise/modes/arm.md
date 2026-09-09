@@ -35,7 +35,13 @@ of each §6 line it covers, and add one line under the §6 table: `Snapshot take
 rule tags stay AT aliases; they do not change. From this point `reconcile` reads the
 map, never §6.
 
-No map → skip this section; there is no bridge step, and §6 gains no `Row` column.
+Then run `python3 "${CLAUDE_SKILL_DIR}/scripts/bridge_validate.py" <doc>`. Fix every
+error it reports — a missing `Row`, a bad row id, a missing snapshot line — before
+the steps below. A warning is drift against the map's current text, not a defect
+here: name it in the close-out rather than editing §6, which is now a snapshot.
+
+No map → skip this section; there is no bridge step, §6 gains no `Row` column, and
+`bridge_validate.py` does not run.
 
 ## With or without a map
 
@@ -52,7 +58,8 @@ No map → skip this section; there is no bridge step, and §6 gains no `Row` co
 3. **Run them RED.** Paste the failing output into §6.
 4. **Show the staged diff, then commit only the test files by explicit path** as the
    branch's first commit — `test(<scope>): red acceptance gate for <capability>` —
-   and record the sha in the doc header.
+   and record the sha in the doc header as its own line, directly under
+   `Supersedes:`: `Red gate: <sha> <YYYY-MM-DD>`.
 5. **With a map**, cite each red test in the lane its altitude picks, per
    `map.lanes` (`references/altitude.md`), so the row's evidence is honest from day
    one — under-proven, visibly, rather than silent.
@@ -69,5 +76,5 @@ No map → skip this section; there is no bridge step, and §6 gains no `Row` co
 ## Close out
 
 Paste §0 inline. List: the rows filed (with a map) or the AT rows armed (without
-one), the tests written, the commit sha, and what could not be checked in this
-environment.
+one), the tests written, the commit sha, any `bridge_validate.py` drift warnings,
+and what could not be checked in this environment.

@@ -13,6 +13,13 @@ closer to true, or further from it, and nothing notices on its own.
 A PR, a branch, a commit, a test file, "we already do this," or "isn't `<row>`
 covered by X?" — never a feedback list. A feedback list is `modes/intake.md`.
 
+When the input also names or matches an outcome doc (Phase 0's `existingDocs`)
+and a map is configured, run
+`python3 "${CLAUDE_SKILL_DIR}/scripts/bridge_validate.py" <doc>` on it before
+anything else below. A `THEN_NOT_IN_MAP` finding means the map moved on since
+§6's snapshot was taken — read the map (`adapter.py row <id>`), never §6, for
+what a scenario asserts now, and say so in the hand-back.
+
 ## Invariant inversion
 
 `intake`'s invariant 6 — reproduce before believing — inverts here:

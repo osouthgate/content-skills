@@ -13,10 +13,12 @@ ACCEPTANCE_TABLE: a qualifying header, at least one data row, non-empty
 Given/When/Then cells), the Why lines, and placeholder text (rule id
 PLACEHOLDER: TBD/TODO/etc markers plus any angle-bracket ``<...>`` run
 in SS0, in the header ``Owner:``/``Last decision:`` values, or in a SS6
-data cell). ``--template`` exempts angle-bracket placeholders and the
-literal ``YYYY-MM-DD`` so the bundled template itself can be linted;
-every other rule stays active under it. A path that cannot be read as
-UTF-8 text reports one UNREADABLE finding for itself instead of raising.
+data cell), and status authority (rule id BUILDING_NEEDS_GATE: a
+``building`` doc's header carries no red-gate commit sha). ``--template``
+exempts angle-bracket placeholders and the literal ``YYYY-MM-DD`` so the
+bundled template itself can be linted; every other rule stays active
+under it. A path that cannot be read as UTF-8 text reports one
+UNREADABLE finding for itself instead of raising.
 Exit 0 when there are no findings, 1 when there are findings (errors,
 or warnings too under --strict), 2 on a usage error. Human output is
 one line per finding: ``<path>:<line>: <RULE_ID> <message>``. ``--json``
@@ -80,6 +82,7 @@ NOTE_START_RE = re.compile(r"^(\d+)\.\s+")
 H3_RE = re.compile(r"^###\s+\S")
 BOLD_LED_RE = re.compile(r"^\*\*[^*]+\*\*")
 ANGLE_PLACEHOLDER_RE = re.compile(r"<[^<>]+>")
+COMMIT_SHA_RE = re.compile(r"\b[0-9a-fA-F]{7,40}\b")
 
 
 def read_text_tolerant(path: str) -> str:
@@ -788,6 +791,29 @@ def check_untested_on_agreed(lines: List[str]) -> List[Dict[str, Any]]:
     ]
 
 
+def check_building_needs_gate(lines: List[str]) -> List[Dict[str, Any]]:
+    """`building` records the human-confirmed act that earned the status: the
+    red-gate commit. Warn when the header (every line before ``## 0.``)
+    carries no 7-40 character hexadecimal run — `arm` writes it as
+    ``Red gate: <sha> <YYYY-MM-DD>``, directly under ``Supersedes:``."""
+    status = get_status(lines)
+    if status != "building":
+        return []
+    tldr_idx = find_line_index(lines, lambda l: l.startswith(TLDR_HEADING))
+    header_end = tldr_idx if tldr_idx is not None else len(lines)
+    if any(COMMIT_SHA_RE.search(line) for line in lines[:header_end]):
+        return []
+    return [
+        finding(
+            "BUILDING_NEEDS_GATE",
+            1,
+            "arm records the red-gate commit in the header as "
+            "'Red gate: <sha> <YYYY-MM-DD>'; none found",
+            "warn",
+        )
+    ]
+
+
 def check_placeholder(lines: List[str], template: bool = False) -> List[Dict[str, Any]]:
     """TBD/TODO-style terms, plus angle-bracket ``<...>`` placeholders, in SS0,
     the header ``Owner:``/``Last decision:`` values, and SS6 data cells.
@@ -932,6 +958,7 @@ RULE_CHECKS = (
     check_scenarios_count,
     check_why_line,
     check_untested_on_agreed,
+    check_building_needs_gate,
     check_agent_notes_many,
     check_human_half_budget,
 )
