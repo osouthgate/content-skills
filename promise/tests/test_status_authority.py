@@ -8,14 +8,18 @@ Run from the repo root:
 
 Checks, matching the ways this rule could quietly stop holding:
 (a) arm.md still states the step and names itself the only writer; (b)
-SKILL.md still states the rule in the open; (c) every line anywhere under
-skills/promise/ that mentions moving a doc to `agreed` or `shipped` also
-names the human actor -- an inventory over every such line, not a fixed
-phrase list a rewording could slip past; (d) the lint rule that makes
-`building` checkable -- BUILDING_NEEDS_GATE -- fires as an ERROR on a
-`building` doc with no red-gate commit line in its header, is not fooled by
-a hex-looking run elsewhere in the header, accepts a digit-only sha, and
-clears once a real `Red gate: <sha> <date>` line is added.
+SKILL.md still states the rule in the open; (c) every sentence anywhere
+under skills/promise/ that mentions `agreed`/`shipped` alongside a
+status-transition verb is checked against a FROZEN ALLOWLIST, not a
+heuristic — a heuristic can always be bypassed (a rewording it wasn't built
+for) or false-positive (unrelated prose it wasn't built to exclude); the
+collector here is deliberately broad instead, and a human decides, once,
+which of what it finds are real; (d) the lint rule that makes `building`
+checkable — BUILDING_NEEDS_GATE — fires as an ERROR on a `building` doc with
+no red-gate commit line in its unfenced header, is not fooled by a
+hex-looking run elsewhere in the header, a fenced illustration, or an
+impossible calendar date, accepts a digit-only sha, and clears once a real
+`Red gate: <sha> <date>` line is added.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 TESTS_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = TESTS_DIR / "fixtures"
@@ -39,37 +43,6 @@ ARM_MD = SKILL / "modes" / "arm.md"
 SKILL_MD = SKILL / "SKILL.md"
 BUILDING_NO_GATE = FIXTURES_DIR / "building_no_gate.md"
 
-# A line instructing something to write/set/flip/mark/move/change a doc TO
-# `agreed`/`shipped` must also name the actor: only a line naming `human`
-# passes. Bare co-occurrence of a status word and a verb on one line is too
-# coarse against real prose — "cannot move to `agreed`" (a precondition, not
-# an instruction), "the code shipped" (a colloquial past tense), "a verdict
-# moves" (a different subject entirely) all share a line with one of these
-# words for reasons that have nothing to do with who writes the doc's own
-# `Status:` field. So a match requires the verb and the status word within a
-# short same-clause gap (no `.`, `;`, `→` in between — those end the clause),
-# in EITHER order — "write `Status: X`" and "`X` ... human-typed" are both
-# real phrasings this skill uses — while a negation immediately before the
-# verb ("cannot move") or a new subject introduced in the gap ("and a
-# verdict moves") is excluded. This still catches a genuine rewording:
-# "change `Status:` to `shipped`", "flip it to `agreed`", "mark it
-# `shipped`" all match (see DetectorSelfTest below).
-STATUS_WORD = r"(?:agreed|shipped)"
-TRANSITION_VERB = r"(?:write|writes|set|sets|flip|flips|mark|marks|move|moves|change|changes|typed)"
-GAP = r"[^.\n;→]{0,30}?"
-NEGATION_RE = re.compile(r"\b(cannot|can't|never|not|n't|won't|shouldn't|don't|doesn't|no)\b", re.IGNORECASE)
-NEW_CLAUSE_RE = re.compile(r"\band (?:a|an|the)\b", re.IGNORECASE)
-FORWARD_RE = re.compile(
-    rf"(?P<neg>\b(?:cannot|can't|never|not|n't|won't|shouldn't|don't|doesn't|no)\b\s+)?"
-    rf"\b(?P<verb>{TRANSITION_VERB})\b(?P<gap>{GAP})`?(?:status:?\s*)?`?\b(?P<status>{STATUS_WORD})\b",
-    re.IGNORECASE,
-)
-BACKWARD_RE = re.compile(
-    rf"`?\b(?P<status>{STATUS_WORD})\b`?(?P<gap>{GAP})\b(?P<verb>{TRANSITION_VERB})\b",
-    re.IGNORECASE,
-)
-HUMAN_RE = re.compile(r"\bhuman\b", re.IGNORECASE)
-
 
 def normalize_whitespace(text: str) -> str:
     """Collapse every run of whitespace (including a line-wrap plus the next
@@ -79,39 +52,13 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def skill_prose_files():
+def skill_prose_files() -> List[Path]:
     """SKILL.md, modes/*.md, references/*.md, outcome-framework.md, templates/*.md."""
     files = [SKILL_MD, SKILL / "outcome-framework.md"]
     files += sorted((SKILL / "modes").glob("*.md"))
     files += sorted((SKILL / "references").glob("*.md"))
     files += sorted((SKILL / "templates").glob("*.md"))
     return [f for f in files if f.is_file()]
-
-
-def transition_matches(line: str) -> List[str]:
-    """Every substring of `line` that reads as an instruction to move a doc
-    TO `agreed`/`shipped` (see the constants above for what is excluded and
-    why). Empty when the line has no such instruction on it at all."""
-    out = []
-    for m in FORWARD_RE.finditer(line):
-        if m.group("neg") or NEW_CLAUSE_RE.search(m.group("gap")):
-            continue
-        out.append(m.group(0))
-    for m in BACKWARD_RE.finditer(line):
-        if NEW_CLAUSE_RE.search(m.group("gap")):
-            continue
-        out.append(m.group(0))
-    return out
-
-
-def status_transition_lines(text: str) -> List[Tuple[int, str]]:
-    """(1-based line number, raw line text) for every line carrying at
-    least one match from `transition_matches`."""
-    out = []
-    for i, line in enumerate(text.splitlines(), 1):
-        if transition_matches(line):
-            out.append((i, line))
-    return out
 
 
 def lint_json(path: Path, *args: str) -> Tuple[subprocess.CompletedProcess, Optional[dict]]:
@@ -122,6 +69,186 @@ def lint_json(path: Path, *args: str) -> Tuple[subprocess.CompletedProcess, Opti
     )
     data = json.loads(result.stdout) if result.stdout.strip() else None
     return result, data
+
+
+# ---------------------------------------------------------------------------
+# The status-transition collector — deliberately broad, no negation or
+# clause logic at all. A heuristic that tries to be clever about what
+# counts as "really" an instruction is exactly what a rewording bypasses
+# and unrelated prose false-positives on; this one does neither, on
+# purpose, and leaves the judgement to the frozen allowlist below.
+# ---------------------------------------------------------------------------
+
+STATUS_WORD_RE = re.compile(r"\b(agreed|shipped)\b", re.IGNORECASE)
+TRANSITION_VERB_RE = re.compile(
+    r"\b(write|writes|written|set|sets|flip|flips|mark|marks|move|moves|"
+    r"change|changes|type|typed|types|advance|advances|promote|promotes|"
+    r"reach|reaches|becomes)\b",
+    re.IGNORECASE,
+)
+_LIST_MARKER_RE = re.compile(r"^([-*]|\d+\.)\s+")
+
+
+def logical_sentences(text: str) -> List[str]:
+    """Markdown line-wraps collapsed into logical paragraphs, then split
+    into sentences.
+
+    A new paragraph starts at a blank line, a heading, a table row, a
+    fence line, or a list-item marker; every other line continues the
+    current paragraph (this is how a wrapped sentence — "cannot move to\\n
+    `agreed`." — is seen as one piece of text, the way a reader sees it,
+    not two unrelated lines). Each paragraph is then split into sentences
+    on a period followed by whitespace or the paragraph's end. This is
+    presentation unwrapping, not a grammar parser — an abbreviation would
+    over-split, which only ever produces a smaller, still-checked
+    fragment, never a missed one.
+    """
+    paragraphs: List[str] = []
+    current: List[str] = []
+
+    def flush() -> None:
+        if current:
+            paragraphs.append(re.sub(r"\s+", " ", " ".join(current)).strip())
+            current.clear()
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            flush()
+            continue
+        starts_new = (
+            stripped.startswith("#")
+            or stripped.startswith("|")
+            or stripped.startswith("```")
+            or stripped.startswith("~~~")
+            or bool(_LIST_MARKER_RE.match(stripped))
+        )
+        if starts_new:
+            flush()
+        current.append(stripped)
+    flush()
+
+    sentences: List[str] = []
+    for para in paragraphs:
+        for piece in re.split(r"(?<=[.])\s+", para):
+            piece = piece.strip()
+            if piece:
+                sentences.append(piece)
+    return sentences
+
+
+def is_status_transition_sentence(sentence: str) -> bool:
+    """True when `sentence` names `agreed`/`shipped` (with or without
+    backticks — `\\b` does not care either way) AND any transition verb,
+    anywhere in the sentence, in any order. No negation check, no clause
+    check, no proximity requirement: deliberately broad."""
+    return bool(STATUS_WORD_RE.search(sentence) and TRANSITION_VERB_RE.search(sentence))
+
+
+def collect_status_transition_sentences() -> Dict[str, List[str]]:
+    """sentence text -> the files it was found in (usually one; the `arm`
+    mode-dispatch row is documented verbatim in two places). Every
+    sentence collected here must be a key in STATUS_TRANSITION_ALLOWLIST
+    below, and every key in that allowlist must show up here — see
+    StatusTransitionAllowlistTests.
+    """
+    found: Dict[str, List[str]] = {}
+    for path in skill_prose_files():
+        text = path.read_text(encoding="utf-8")
+        for sentence in logical_sentences(text):
+            if is_status_transition_sentence(sentence):
+                found.setdefault(sentence, []).append(str(path.relative_to(SKILL)))
+    return found
+
+
+# ---------------------------------------------------------------------------
+# The frozen allowlist. Every sentence collect_status_transition_sentences()
+# finds under skills/promise/ today, each with why it is not an instruction
+# for THIS SKILL to write `agreed`/`shipped` itself:
+#
+#   human-actor              -- names a human as the one who does it, as a rule
+#   describes-the-human-act  -- narrates the human act in passing, not as a rule
+#   negated                  -- describes when the transition is NOT allowed
+#   not-a-transition         -- the verb and the status word are unrelated here
+#
+# A sentence the collector finds that is not a key here fails the test: a
+# human must read it and either add it, with a reason, or reword the doc so
+# it no longer reads as a status-transition instruction. A key here that the
+# collector no longer finds anywhere also fails — a stale entry would hide a
+# doc change from review just as surely as a missing one would.
+# ---------------------------------------------------------------------------
+
+STATUS_TRANSITION_ALLOWLIST: Dict[str, str] = {
+    "Where the project configures a capability map, the map becomes the "
+    "source of the doc's scenarios from the moment a human marks the doc "
+    "`agreed` — the doc's acceptance rows are filed there as rows, and "
+    "`intake`/`reconcile` read and write the map, not a second copy inside "
+    "the doc.": "describes-the-human-act",
+
+    '| `arm` | `modes/arm.md` | an `agreed` doc plus "start building", '
+    '"arm it", "write the red tests", "file the rows", "kick off the '
+    'build" |': "not-a-transition",
+
+    "- `agreed` and `shipped` are typed by a human, never by this skill.":
+        "human-actor",
+
+    "- A doc in `draft` with unresolved BLOCKING questions cannot move to "
+    "`agreed`.": "negated",
+
+    "Write the new row id into the `Row` column of each §6 line it "
+    "covers, and add one line under the §6 table: `Snapshot taken at "
+    "`agreed` on <date>; the map is the source of these scenarios from "
+    "here on.` §0's rule tags stay AT aliases; they do not change.":
+        "not-a-transition",
+
+    "`agreed` and `shipped` stay human-typed.": "human-actor",
+
+    "- Set `Status: draft` on the survivor, even where a folded doc was "
+    "`agreed` or later — the merge is a new draft until the human "
+    "re-ratifies it.": "not-a-transition",
+
+    "**The human flips `Status: shipped`, never this mode.**": "human-actor",
+
+    "- Doc is `agreed` or later → a §0 change un-ratifies it.":
+        "not-a-transition",
+
+    "| \"Status agreed is a formality, I'll flip it.\" | It's the human "
+    "act the whole framework protects.": "describes-the-human-act",
+
+    "Where the project keeps a **capability map** — a machine-checked "
+    "register of promises and the tests that prove them — the doc's "
+    "acceptance rows become **rows** in that map when the doc is "
+    "`agreed`, and the map becomes the source of the scenarios from then "
+    "on.": "not-a-transition",
+
+    "| `shipped` | Human flips it when §6 rows are green.": "human-actor",
+
+    "`agreed` and `shipped` are typed by a human.": "human-actor",
+
+    "The rendered block is ≤ 20 lines and says: capability work goes "
+    "through `/promise` in plain words (the mode is inferred); one doc "
+    "per capability in the docs home, in the Outcome Framework shape; §0 "
+    "is the human's verbatim block and agents only append notes below "
+    "it; `Status:` moves forward only by a human; where a map is "
+    "configured it is the source of scenarios after `agreed` and a "
+    "verdict moves only at the altitude the row's own `Then` claims; "
+    "before writing any design, plan or spec doc by hand, run `/promise` "
+    "— a sibling doc is a bug.": "human-actor",
+
+    "No mode file restates a project's mechanics; each says \"read the "
+    "recipe, work from the file.\" Look in the recipe for the parts a "
+    "mode will ask for by name: a **routing table** (which relation a "
+    "piece of feedback becomes), the **lockstep rule** (which files move "
+    "together, and in what order), a **lane table** (how a `Then`'s "
+    "altitude picks a test kind), a **verification block** (the commands "
+    "to run before calling anything done), and a **shipped-work "
+    "section** — the mirror direction, code landed and a row needs "
+    "updating.": "not-a-transition",
+
+    "- `Status:` reaches `agreed` and `shipped` only by a human's hand; "
+    "`building` only after the human approves the red-test commit.":
+        "human-actor",
+}
 
 
 class ArmWritesOnlyBuilding(unittest.TestCase):
@@ -148,101 +275,83 @@ class SkillStatesTheRule(unittest.TestCase):
         self.assertIn("typed by a human", text)
 
 
-class OnlyAHumanMovesAgreedOrShipped(unittest.TestCase):
-    """Inventory check, not a fixed phrase list: every line anywhere under
-    skills/promise/ that talks about moving a doc to `agreed`/`shipped`
-    must name `human` as the actor on that same line. A rewording
-    ("change `Status:` to `shipped`", "flip it to agreed") is still caught,
-    because the check is about what the line SAYS, not which of six exact
-    strings it happens to contain."""
+class StatusTransitionAllowlistTests(unittest.TestCase):
+    """(c): every collected sentence must be allowlisted; every allowlisted
+    sentence must still be collected. Both directions are load-bearing —
+    the first catches a new bypass-shaped sentence, the second catches an
+    allowlist that has quietly gone stale and stopped meaning anything."""
 
-    def test_every_status_transition_line_names_the_human_actor(self) -> None:
-        checked = 0
-        for path in skill_prose_files():
-            text = path.read_text(encoding="utf-8")
-            for line_no, line in status_transition_lines(text):
-                checked += 1
-                # Asserted individually, one subTest per line, rather than
-                # batched into one pass/fail: a run naming which specific
-                # file:line lacks `human` (not just that "something" did)
-                # is what actually tells a reader what to go fix.
-                with self.subTest(file=str(path.relative_to(SKILL)), line=line_no):
-                    self.assertRegex(
-                        line,
-                        HUMAN_RE,
-                        f"{path.relative_to(SKILL)}:{line_no} mentions moving to agreed/shipped "
-                        f"without naming the human actor: {line.strip()!r}",
-                    )
+    def test_every_collected_sentence_is_allowlisted(self) -> None:
+        collected = collect_status_transition_sentences()
+        unlisted = [s for s in collected if s not in STATUS_TRANSITION_ALLOWLIST]
+        self.assertEqual(
+            unlisted,
+            [],
+            "new status-transition sentence — a human must read it and add it to "
+            "the allowlist, or reword it:\n\n"
+            + "\n\n".join(f"{s!r}\n  found in: {', '.join(collected[s])}" for s in unlisted),
+        )
 
-        # A scan that found zero transition lines anywhere would make every
-        # subTest above vacuous — the rule IS stated in arm.md/SKILL.md, so
-        # at least one line must have matched, or this test proves nothing
-        # about a rewording that removes `human` from all of them.
-        self.assertGreater(checked, 0, "no status-transition line was found under skills/promise/ to check")
+    def test_every_allowlist_entry_still_exists(self) -> None:
+        collected = collect_status_transition_sentences()
+        stale = [s for s in STATUS_TRANSITION_ALLOWLIST if s not in collected]
+        self.assertEqual(
+            stale,
+            [],
+            "allowlisted sentence no longer found anywhere under skills/promise/ "
+            "(a stale entry hides a doc change from review):\n\n"
+            + "\n\n".join(repr(s) for s in stale),
+        )
 
-    def test_every_prose_file_was_actually_scanned(self) -> None:
-        # A file-collection bug that silently scans zero files would make
-        # the test above vacuous. Pin a floor: SKILL.md, outcome-framework.md,
-        # 8 modes, at least 4 references, at least 1 template.
-        files = skill_prose_files()
-        self.assertIn(SKILL_MD, files)
-        self.assertIn(SKILL / "outcome-framework.md", files)
-        self.assertGreaterEqual(len(list((SKILL / "modes").glob("*.md"))), 8)
-        self.assertGreaterEqual(len(files), 14)
+    def test_allowlist_reasons_are_one_of_the_four_words(self) -> None:
+        allowed_reasons = {"human-actor", "describes-the-human-act", "negated", "not-a-transition"}
+        for sentence, reason in STATUS_TRANSITION_ALLOWLIST.items():
+            with self.subTest(sentence=sentence[:60]):
+                self.assertIn(reason, allowed_reasons, f"{reason!r} is not one of {allowed_reasons}")
+
+    def test_collector_found_at_least_one_sentence(self) -> None:
+        # A collector that silently finds nothing would make both checks
+        # above vacuous — the rule IS stated in arm.md/SKILL.md, so at
+        # least one sentence must be found.
+        collected = collect_status_transition_sentences()
+        self.assertGreater(len(collected), 0, "no status-transition sentence was found at all")
 
 
-class DetectorSelfTest(unittest.TestCase):
-    """Positive and negative controls for transition_matches/HUMAN_RE, run
-    against fixed strings rather than the live docs — a phrase list would
-    miss every rewording below; a docs edit could accidentally make the
-    scan above vacuous either way. Pin both directions so a regression in
-    the regex itself, not just in the docs, is caught here."""
+class CollectorUnitProbes(unittest.TestCase):
+    """A heuristic detector was bypassable and had false positives (a prior
+    Codex re-review finding); these three fixed phrasings are the proof —
+    the deliberately broad collector above must COLLECT all three (whether
+    they are ALLOWED is the allowlist's job, and none of them is in it,
+    since none exists in the real docs today)."""
 
-    # Real bypass phrasings the check must catch (none names `human`).
-    BYPASSES = (
-        "Then change `Status:` to `shipped` once the suite is green.",
-        "Flip it to `agreed` once you're happy.",
-        "Mark it `shipped`.",
+    PROBES = (
+        # Bypassed a "does the line also say human" check: `human` appears,
+        # but not as the actor of the write.
+        "Set Status: shipped without human approval.",
+        # False-positived a negation/clause heuristic: this sentence STATES
+        # the rule correctly (the skill never sets it) but was flagged as
+        # if it were the violation.
+        "`shipped` should never be set by the skill.",
+        # Missed by a heuristic requiring the verb and the status word
+        # within a short gap or a specific order.
+        "Change the status and the document state to shipped.",
     )
 
-    # Lines drawn from the skill's own docs that mention `agreed`/`shipped`
-    # near one of the transition verbs for reasons unrelated to who writes
-    # the field — a precondition, a colloquial past tense, an unrelated
-    # subject. None of these may match at all.
-    NON_INSTRUCTIONS = (
-        '| `arm` | `modes/arm.md` | an `agreed` doc plus "start building", '
-        '"arm it", "write the red tests", "file the rows", "kick off the build" |',
-        "A doc in `draft` with unresolved BLOCKING questions cannot move to `agreed`.",
-        "Set `Status: draft` on the survivor, even where a folded doc was `agreed`",
-        "Doc is `agreed` or later → a §0 change un-ratifies it.",
-        "A PR merging says the code shipped, not that the test was watched — "
-        "the verdict moves when the evidence reaches the `Then`'s altitude.",
-        "after `agreed` and a verdict moves only at the altitude the row's own `Then` claims;",
-        "after a doc is `agreed`. A verdict moves only when evidence reaches the altitude",
-    )
-
-    TRUE_POSITIVE = "it records — say so in the close-out. `agreed` and `shipped` stay human-typed."
-
-    def test_catches_every_bypass_phrasing(self) -> None:
-        for bypass in self.BYPASSES:
-            with self.subTest(line=bypass):
-                found = transition_matches(bypass)
-                self.assertTrue(found, f"detector missed a real bypass: {bypass!r}")
-                self.assertFalse(
-                    HUMAN_RE.search(bypass),
-                    f"fixture is not actually a bypass — it already names human: {bypass!r}",
+    def test_all_three_probes_are_collected(self) -> None:
+        for probe in self.PROBES:
+            with self.subTest(probe=probe):
+                self.assertTrue(
+                    is_status_transition_sentence(probe),
+                    f"the broad collector must catch this phrasing: {probe!r}",
                 )
 
-    def test_does_not_flag_unrelated_prose(self) -> None:
-        for line in self.NON_INSTRUCTIONS:
-            with self.subTest(line=line):
-                found = transition_matches(line)
-                self.assertEqual(found, [], f"false positive on unrelated prose: {line!r}")
-
-    def test_recognises_the_human_typed_phrasing(self) -> None:
-        found = transition_matches(self.TRUE_POSITIVE)
-        self.assertTrue(found, "detector must still recognise the skill's own correct phrasing")
-        self.assertTrue(HUMAN_RE.search(self.TRUE_POSITIVE))
+    def test_none_of_the_probes_is_allowlisted(self) -> None:
+        for probe in self.PROBES:
+            with self.subTest(probe=probe):
+                self.assertNotIn(
+                    probe, STATUS_TRANSITION_ALLOWLIST,
+                    f"probe should not already exist in the real docs: {probe!r}",
+                )
 
 
 class BuildingNeedsGateRule(unittest.TestCase):
@@ -275,6 +384,7 @@ class BuildingNeedsGateRule(unittest.TestCase):
         self.assertEqual(findings[0]["severity"], "error")
 
     def test_clears_once_a_red_gate_commit_is_in_the_header(self) -> None:
+        # A real line directly under `Supersedes:` clears the rule.
         text = BUILDING_NO_GATE.read_text(encoding="utf-8")
         with_gate = text.replace(
             "Supersedes: —\n", "Supersedes: —\nRed gate: a1b2c3d 2026-01-02\n", 1
@@ -322,6 +432,56 @@ class BuildingNeedsGateRule(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         rules = [f["rule"] for f in data["findings"]]
         self.assertIn("BUILDING_NEEDS_GATE", rules, data["findings"])
+
+    def test_fenced_red_gate_line_does_not_clear_the_rule(self) -> None:
+        # A Red gate: line sitting inside a fenced code block (an
+        # illustration, not the doc's own header) must not clear the rule.
+        text = BUILDING_NO_GATE.read_text(encoding="utf-8")
+        fenced = text.replace(
+            "Supersedes: —\n",
+            "Supersedes: —\n```\nRed gate: a1b2c3d 2026-01-02\n```\n",
+            1,
+        )
+        self.assertNotEqual(fenced, text)
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, data = lint_json(self._write(tmp, fenced))
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        rules = [f["rule"] for f in data["findings"]]
+        self.assertIn("BUILDING_NEEDS_GATE", rules, data["findings"])
+        finding = next(f for f in data["findings"] if f["rule"] == "BUILDING_NEEDS_GATE")
+        self.assertIn("none found", finding["message"])
+
+    def test_tilde_fenced_red_gate_line_does_not_clear_the_rule(self) -> None:
+        text = BUILDING_NO_GATE.read_text(encoding="utf-8")
+        fenced = text.replace(
+            "Supersedes: —\n",
+            "Supersedes: —\n~~~\nRed gate: a1b2c3d 2026-01-02\n~~~\n",
+            1,
+        )
+        self.assertNotEqual(fenced, text)
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, data = lint_json(self._write(tmp, fenced))
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        rules = [f["rule"] for f in data["findings"]]
+        self.assertIn("BUILDING_NEEDS_GATE", rules, data["findings"])
+
+    def test_impossible_date_fires_its_own_message(self) -> None:
+        # A line matching the sha/date SHAPE but naming a date that does
+        # not exist on the calendar is its own finding, not silently
+        # treated as no line at all.
+        text = BUILDING_NO_GATE.read_text(encoding="utf-8")
+        bad_date = text.replace(
+            "Supersedes: —\n", "Supersedes: —\nRed gate: a1b2c3d 2026-02-31\n", 1
+        )
+        self.assertNotEqual(bad_date, text)
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, data = lint_json(self._write(tmp, bad_date))
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        findings = [f for f in data["findings"] if f["rule"] == "BUILDING_NEEDS_GATE"]
+        self.assertEqual(len(findings), 1, data["findings"])
+        self.assertEqual(findings[0]["severity"], "error")
+        self.assertIn("not a real calendar date", findings[0]["message"])
+        self.assertIn("2026-02-31", findings[0]["message"])
 
     def test_conforming_and_template_still_lint_clean(self) -> None:
         # A rule this specific must not fire on either baseline fixture —

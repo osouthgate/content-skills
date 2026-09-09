@@ -54,6 +54,7 @@ ROW_SECOND = FIXTURES_DIR / "row_second_column.md"
 HEADER_MISSING_THEN = FIXTURES_DIR / "header_missing_then.md"
 DUPLICATE_THEN = FIXTURES_DIR / "duplicate_then_column.md"
 DUPLICATE_ROW = FIXTURES_DIR / "duplicate_row_column.md"
+MIXED_VALID_AND_MALFORMED = FIXTURES_DIR / "mixed_valid_and_malformed_table.md"
 
 
 def run_json(script: Path, *args: str) -> Tuple[subprocess.CompletedProcess, Optional[dict]]:
@@ -78,7 +79,7 @@ class FixturesExistTests(unittest.TestCase):
     def test_every_fixture_exists(self) -> None:
         for path in (
             LABEL_NO_ROW, LABEL_NO_ROW_AGREED, ROW_SECOND, HEADER_MISSING_THEN,
-            DUPLICATE_THEN, DUPLICATE_ROW,
+            DUPLICATE_THEN, DUPLICATE_ROW, MIXED_VALID_AND_MALFORMED,
         ):
             self.assertTrue(path.is_file(), f"missing fixture: {path}")
 
@@ -190,8 +191,10 @@ class HeaderMissingThenTests(unittest.TestCase):
 class DuplicateColumnNameTests(unittest.TestCase):
     """A header naming `Given`/`When`/`Then`/`Row` more than once is rejected
     outright — never a guessed mapping — the same as a header missing one of
-    them. SCENARIOS_COUNT/TAGS_RESOLVE still see every row, via the same
-    positional fallback a missing-name header already relies on."""
+    them. SCENARIOS_COUNT/TAGS_RESOLVE still see every row (for id/count
+    purposes only: given/when/then come back empty and row comes back None
+    for such a row — never a value read from a position that might belong
+    to an entirely different column)."""
 
     def test_duplicate_then_fires_acceptance_table_alone(self) -> None:
         result, data = run_json(LINT, str(DUPLICATE_THEN), "--json")
@@ -203,6 +206,8 @@ class DuplicateColumnNameTests(unittest.TestCase):
         result, data = run_json(ROWS, str(DUPLICATE_THEN), "--json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(data["rows"]), 3)
+        for r in data["rows"]:
+            self.assertIsNone(r["row"], r)
 
     def test_duplicate_row_column_fires_acceptance_table_alone(self) -> None:
         result, data = run_json(LINT, str(DUPLICATE_ROW), "--json")
@@ -214,6 +219,48 @@ class DuplicateColumnNameTests(unittest.TestCase):
         result, data = run_json(ROWS, str(DUPLICATE_ROW), "--json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(data["rows"]), 3)
+        for r in data["rows"]:
+            self.assertIsNone(r["row"], r)
+
+
+class MixedValidAndMalformedTableTests(unittest.TestCase):
+    """A malformed acceptance-shaped table beside a VALID one used to be
+    silently discarded — find_acceptance_tables() dropped any candidate
+    that failed its own header check the moment another candidate
+    qualified, so the malformed sibling produced zero findings, and
+    parse_acceptance_rows's positional fallback read the sibling's second
+    `Then` column as if it were `Row`. Both are fixed: every candidate is
+    reported on its own terms, and a non-qualifying candidate's rows never
+    guess at `row`."""
+
+    def test_malformed_sibling_is_reported_even_though_the_other_table_qualifies(self) -> None:
+        result, data = run_json(LINT, str(MIXED_VALID_AND_MALFORMED), "--json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
+        self.assertEqual(error_rules, ["ACCEPTANCE_TABLE"])
+        # Exactly one finding: the malformed sibling, not the valid table.
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+
+    def test_valid_table_rows_read_normally(self) -> None:
+        result, data = run_json(ROWS, str(MIXED_VALID_AND_MALFORMED), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        by_id = {r["id"]: r for r in data["rows"]}
+        self.assertEqual(by_id["AT-1"]["then"], "she gets no push or badge from it")
+        self.assertEqual(by_id["AT-2"]["then"], "notifications resume immediately")
+        self.assertEqual(by_id["AT-3"]["then"], "Ben is still notified normally")
+
+    def test_malformed_sibling_row_is_counted_but_row_is_null(self) -> None:
+        # The concrete failure this guards: the malformed sibling's SECOND
+        # `Then` column must never be read into `row`.
+        result, data = run_json(ROWS, str(MIXED_VALID_AND_MALFORMED), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        by_id = {r["id"]: r for r in data["rows"]}
+        self.assertIn("AT-4", by_id)
+        self.assertIsNone(by_id["AT-4"]["row"])
+        self.assertEqual(by_id["AT-4"]["given"], "")
+        self.assertEqual(by_id["AT-4"]["when"], "")
+        self.assertEqual(by_id["AT-4"]["then"], "")
+        self.assertEqual(len(data["rows"]), 4)
 
 
 class RegressionGuardTests(unittest.TestCase):
