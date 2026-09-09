@@ -299,56 +299,131 @@ def parse_table_data_rows(lines: List[str], start: int, end: int) -> List[Tuple[
     return out
 
 
+REQUIRED_ACCEPTANCE_COLUMNS = ("given", "when", "then")
+
+
+def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optional[int]]]:
+    """Column name -> 0-based index for one SS6 acceptance-table header, or
+    None when the header does not qualify as an acceptance table at all.
+
+    Columns are matched by HEADER NAME, case-insensitive and trimmed, never
+    by position — a real doc's header can read ``# | Label | Given | When |
+    Then`` (an extra column before Given) or carry ``Row`` anywhere, and
+    still qualify. The id column is always the first cell, and must be
+    ``#``, ``ID`` or ``AT`` (case-insensitive) — this one column is
+    positional by definition, not looked up by name. ``Given``, ``When``
+    and ``Then`` must each appear by name somewhere in the header (any
+    order); a header missing one of them does not qualify, the same as no
+    table at all. ``Row`` is optional: its index when a column is named
+    ``Row``, else None, so a doc with no Row column reads every row's
+    ``row`` as None rather than misreading some other column. Any other
+    header cell (``Label``, ``Notes``, ...) sits in the table but is never
+    read into a named field. A name repeated in the header keeps its first
+    occurrence.
+    """
+    if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
+        return None
+    by_name: Dict[str, int] = {}
+    for i, cell in enumerate(header_cells):
+        key = cell.strip().lower()
+        if key and key not in by_name:
+            by_name[key] = i
+    for name in REQUIRED_ACCEPTANCE_COLUMNS:
+        if name not in by_name:
+            return None
+    mapping: Dict[str, Optional[int]] = {"id": 0}
+    mapping.update({name: by_name[name] for name in REQUIRED_ACCEPTANCE_COLUMNS})
+    mapping["row"] = by_name.get("row")
+    return mapping
+
+
 def find_acceptance_tables(
     lines: List[str], start: int, end: int
-) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]]]]:
+) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]], Dict[str, Optional[int]]]]:
     """Tables in [start, end) that qualify as SS6's acceptance table.
 
-    A table qualifies when its header's first cell is ``#``/``ID``/``AT``
-    (case-insensitive, matching ``parse_table_data_rows``) *and* the header
-    has 4 or 5 cells (``Given``, ``When``, ``Then``, optional ``Row``). A
-    first-cell match at the wrong width does not qualify — ACCEPTANCE_TABLE
-    reports it the same as no table at all. Returns a list of
-    (header_line, header_cells, data_rows), each already separator-stripped.
+    A table qualifies exactly when ``acceptance_column_map`` returns a
+    mapping for its header: first cell ``#``/``ID``/``AT``, and ``Given``,
+    ``When`` and ``Then`` all present by name (any order, extra columns
+    allowed, ``Row`` optional and found by name). A first-cell match whose
+    header is missing one of those names does not qualify — ACCEPTANCE_TABLE
+    reports it the same as no table at all. Returns a list of (header_line,
+    header_cells, data_rows, column_map), each already separator-stripped.
     """
     found = []
     for table in split_tables(lines, start, end):
         header_line, header_cells = table[0]
-        if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
-            continue
-        if len(header_cells) not in (4, 5):
+        column_map = acceptance_column_map(header_cells)
+        if column_map is None:
             continue
         body = table[1:]
         if body and is_separator(body[0][1]):
             body = body[1:]
-        found.append((header_line, header_cells, body))
+        found.append((header_line, header_cells, body, column_map))
     return found
 
 
+# The template's own column order — used only as a fallback for a header
+# that matches ACCEPTANCE_HEADER_RE but does not name Given/When/Then
+# (already reported on its own terms by ACCEPTANCE_TABLE), so a doc with a
+# still-malformed header keeps yielding its row ids and count instead of
+# silently losing every row the moment one column name is missing.
+_POSITIONAL_FALLBACK_COLUMNS: Dict[str, Optional[int]] = {
+    "id": 0, "given": 1, "when": 2, "then": 3, "row": 4,
+}
+
+
+def _cell_at(cells: List[str], idx: Optional[int]) -> str:
+    """``cells[idx]``, or "" when idx is None or past the row's own length —
+    a short row (ACCEPTANCE_TABLE's own concern) never raises here."""
+    return cells[idx] if idx is not None and idx < len(cells) else ""
+
+
 def parse_acceptance_rows(lines: List[str]) -> List[Dict[str, Any]]:
-    """Well-formed SS6 rows (id, given, when, then, row) keyed on ``AT-\\d+``."""
+    """Well-formed SS6 rows (id, given, when, then, row) keyed on ``AT-\\d+``.
+
+    A table is a candidate the same way ACCEPTANCE_TABLE's own scan is:
+    its header's first cell is ``#``/``ID``/``AT``. When the header also
+    names Given/When/Then (``acceptance_column_map``), each column is read
+    by that name — so an extra column (a ``Label``) or a reordered ``Row``
+    never shifts what a cell means, and ``row`` is None whenever no header
+    cell is named Row. A header that matches on its first cell but is
+    missing one of those names falls back to the template's own column
+    order (``_POSITIONAL_FALLBACK_COLUMNS``), so counting (SCENARIOS_COUNT)
+    and id resolution (TAGS_RESOLVE) still see every AT-tagged row — the
+    same as before a header carried names at all; ACCEPTANCE_TABLE is what
+    reports the header as broken, not the loss of every row in it.
+    """
     bounds = section_bounds(lines, 6)
     if bounds is None:
         return []
     start, end = bounds
     rows = []
-    for line_no, cells in parse_table_data_rows(lines, start + 1, end):
-        if not cells or not AT_ID_RE.match(cells[0]):
+    for table in split_tables(lines, start + 1, end):
+        header_cells = table[0][1]
+        if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
             continue
-        given = cells[1] if len(cells) > 1 else ""
-        when = cells[2] if len(cells) > 2 else ""
-        then = cells[3] if len(cells) > 3 else ""
-        row_col = cells[4].strip() if len(cells) > 4 and cells[4].strip() else None
-        rows.append(
-            {
-                "line": line_no,
-                "id": cells[0],
-                "given": given,
-                "when": when,
-                "then": then,
-                "row": row_col,
-            }
-        )
+        column_map = acceptance_column_map(header_cells) or _POSITIONAL_FALLBACK_COLUMNS
+        body = table[1:]
+        if body and is_separator(body[0][1]):
+            body = body[1:]
+        for line_no, cells in body:
+            if not cells or not AT_ID_RE.match(cells[0]):
+                continue
+            given = _cell_at(cells, column_map["given"])
+            when = _cell_at(cells, column_map["when"])
+            then = _cell_at(cells, column_map["then"])
+            row_text = _cell_at(cells, column_map["row"]).strip()
+            rows.append(
+                {
+                    "line": line_no,
+                    "id": cells[0],
+                    "given": given,
+                    "when": when,
+                    "then": then,
+                    "row": row_text or None,
+                }
+            )
     return rows
 
 
@@ -659,16 +734,16 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
             finding(
                 "ACCEPTANCE_TABLE",
                 start + 1,
-                "SS6 has no acceptance table (need a header whose first cell is "
-                "'#', 'ID' or 'AT', with 4 or 5 columns)",
+                "SS6 has no acceptance table (need a header row whose first cell is "
+                "'#', 'ID' or 'AT' and which names Given, When and Then)",
                 "error",
             )
         ]
 
     out: List[Dict[str, Any]] = []
     total_rows = 0
-    cell_names = ("Given", "When", "Then")
-    for header_line, header_cells, body in tables:
+    required_cell_names = ("Given", "When", "Then")
+    for header_line, header_cells, body, column_map in tables:
         width = len(header_cells)
         for line_no, cells in body:
             total_rows += 1
@@ -682,8 +757,9 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
                     )
                 )
                 continue
-            for offset, name in enumerate(cell_names, start=1):
-                if not cells[offset].strip():
+            for name in required_cell_names:
+                idx = column_map[name.lower()]
+                if not cells[idx].strip():
                     out.append(
                         finding(
                             "ACCEPTANCE_TABLE",

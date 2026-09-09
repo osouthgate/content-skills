@@ -285,7 +285,7 @@ parseable value. A directory lints every `*.md` containing `## 0. TLDR`.
 | `RULES_TAGGED` | Every rule ends with `→ AT-n[, AT-m…]` or `→ UNTESTED`. | error |
 | `TAGS_RESOLVE` | Every `AT-n` cited in a §0 tag exists as a row id in §6. | error |
 | `AT_IDS_UNIQUE` | §6 row ids are unique and match `AT-\d+`. | error |
-| `ACCEPTANCE_TABLE` | §6 holds at least one acceptance table — header first cell `#`, `ID` or `AT`, four or five columns — with at least one data row; every data row has the right cell count and non-empty Given, When and Then. Other tables in §6 are ignored. | error |
+| `ACCEPTANCE_TABLE` | §6 holds at least one acceptance table — a header row whose first cell is `#`, `ID` or `AT` and which names `Given`, `When` and `Then` (any order, case-insensitive, extra columns allowed, an optional `Row` column recognised by name) — with at least one data row; every data row has the right cell count and non-empty Given, When and Then. Columns are matched by header name, never position, so an extra column or a reordered `Row` never shifts what a cell means. Other tables in §6 are ignored. | error |
 | `SCENARIOS_COUNT` | The `**Scenarios:**` line's acceptance-row count equals the number of §6 rows. The worked-example count is checked only if §3 examples are parseable (`### ` or bold-led blocks); otherwise `warn` that it was not checked. | error / warn |
 | `WHY_LINE` | §4, §5, §6, §7 each contain a line beginning `Why — what breaks without it:`. | error |
 | `UNTESTED_ON_AGREED` | A rule tagged `UNTESTED` while `Status:` is `agreed`, `building` or `shipped`. | error |
