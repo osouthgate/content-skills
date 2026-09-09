@@ -46,10 +46,11 @@ the doc stays the only home, always.
 ## Other hosts
 
 This file follows the shared SKILL.md standard, so Codex and Cursor read it too. Three
-things below are Claude Code notation; translate them on other hosts: `${CLAUDE_SKILL_DIR}`
-is the directory containing this file; `$ARGUMENTS` is the user's whole message and `$0`
-its first word; a `!` block is a command the host runs at load time — if it did not run,
-run that command by hand as the first action.
+things below are Claude Code notation, which Claude expands at load time and other hosts
+show literally; translate them there: the CLAUDE_SKILL_DIR variable is the directory
+containing this file; the ARGUMENTS variable is the user's whole message; a line that
+starts with an exclamation mark and a backtick is a command the host runs at load time —
+if it did not run, run that command by hand as the first action.
 
 ## Phase 0 — orient
 
