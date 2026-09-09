@@ -37,7 +37,7 @@ skills/promise/
   modes/                   one file per mode, loaded only when that mode runs
   references/              architecture.md · slates.md · altitude.md · anti-rationalizations.md · config.md
   templates/               outcome-doc.md · promise.config.example.json · claude-md-section.md
-  scripts/                 orient.py · lint_outcome.py · outcome_rows.py · adopt.py · adapter.py · render_outcome.py · framework_section.py   (Python 3, stdlib only)
+  scripts/                 orient.py · lint_outcome.py · outcome_rows.py · adopt.py · adapter.py · render_outcome.py · framework_section.py · bridge_validate.py   (Python 3, stdlib only)
 tests/                     unit tests and one-change fixtures for every lint rule
 ```
 
@@ -95,6 +95,7 @@ python3 skills/promise/scripts/outcome_rows.py --search "login stays private" --
 python3 skills/promise/scripts/adopt.py --dry-run                 # config + CLAUDE.md section, as a diff
 python3 skills/promise/scripts/adapter.py show                    # the project commands the skill would run; runs nothing
 python3 skills/promise/scripts/render_outcome.py --title "Export a channel" --owner Ana   # a new doc from the template
+python3 skills/promise/scripts/bridge_validate.py docs/designs/foo.md --json   # the bridge's staleness check, against the map
 python3 -m unittest discover -s promise/tests -v              # from the repository root
 ```
 

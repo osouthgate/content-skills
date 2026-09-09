@@ -33,11 +33,15 @@ RENDER = SCRIPTS_DIR / "render_outcome.py"
 FIXTURE_SCRIPTS_DIR = FIXTURES_DIR / "scripts"
 MINIREPO = FIXTURES_DIR / "minirepo"
 
-# A single feedback-shaped string carrying every shell metacharacter that
-# would matter if it were ever composed into a shell command instead of
-# passed as one argv element: a quote, a semicolon-joined command, a
-# $(...) substitution and a backtick substitution.
-HOSTILE_QUERY = '"; echo PWNED; $(echo X) `whoami`'
+# A feedback-shaped string carrying a quote that would close early if this
+# were ever composed into a shell command instead of passed as one argv
+# element, followed by a command that WOULD create MARKER if a shell ever
+# ran it. `touch`, not a mere `echo`, so the marker's absence later is real
+# evidence — a payload whose worst case only prints something (as a bare
+# `echo PWNED` does — it prints, it does not create a file called PWNED)
+# would make that absence prove nothing either way.
+MARKER = MINIREPO / "PWNED"
+HOSTILE_QUERY = f'"; touch {MARKER}; echo "'
 
 
 def run(script: Path, *args: str, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
@@ -127,7 +131,23 @@ class AdapterShowTests(unittest.TestCase):
 class AdapterFindTests(unittest.TestCase):
     """A hostile query travels to the child as exactly one argv element."""
 
+    def test_payload_is_a_genuine_positive_control(self):
+        # Before trusting MARKER's absence as proof of safety in the two
+        # tests below, prove the payload really would create it under a
+        # real shell — a payload that could never create the marker (an
+        # unmatched quote, or a command that only prints, as the original
+        # `echo PWNED` did) would make that proof vacuous.
+        self.addCleanup(lambda: MARKER.unlink(missing_ok=True))
+        self.assertFalse(MARKER.exists())
+        subprocess.run(f'true "{HOSTILE_QUERY}"', shell=True)
+        self.assertTrue(
+            MARKER.exists(),
+            "the payload must be able to create the marker under a real shell, "
+            "or its absence later proves nothing",
+        )
+
     def test_hostile_query_arrives_verbatim_as_one_argument(self):
+        self.addCleanup(lambda: MARKER.unlink(missing_ok=True))
         result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "find", HOSTILE_QUERY)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         data = json.loads(result.stdout)
@@ -140,13 +160,13 @@ class AdapterFindTests(unittest.TestCase):
         # the child (a fixture that prints repr(sys.argv[1:])) received it
         # as a single-element list, not split or expanded by anything.
         self.assertEqual(data["stdout"], repr([HOSTILE_QUERY]) + "\n")
+        self.assertFalse(MARKER.exists(), "the hostile query's shell metacharacters must never reach a shell")
 
     def test_nothing_the_query_names_is_ever_executed(self):
-        marker = MINIREPO / "PWNED"
-        self.addCleanup(lambda: marker.unlink(missing_ok=True))
+        self.addCleanup(lambda: MARKER.unlink(missing_ok=True))
         result = run(ADAPTER, "--cwd", str(MINIREPO), "find", HOSTILE_QUERY)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertFalse(marker.exists(), "the hostile query's `echo PWNED` must never run")
+        self.assertFalse(MARKER.exists(), "the hostile query's shell metacharacters must never reach a shell")
 
     def test_missing_map_is_exit_2(self):
         with tempfile.TemporaryDirectory() as tmp:

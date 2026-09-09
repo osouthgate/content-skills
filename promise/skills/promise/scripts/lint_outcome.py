@@ -13,10 +13,12 @@ ACCEPTANCE_TABLE: a qualifying header, at least one data row, non-empty
 Given/When/Then cells), the Why lines, and placeholder text (rule id
 PLACEHOLDER: TBD/TODO/etc markers plus any angle-bracket ``<...>`` run
 in SS0, in the header ``Owner:``/``Last decision:`` values, or in a SS6
-data cell). ``--template`` exempts angle-bracket placeholders and the
-literal ``YYYY-MM-DD`` so the bundled template itself can be linted;
-every other rule stays active under it. A path that cannot be read as
-UTF-8 text reports one UNREADABLE finding for itself instead of raising.
+data cell), and status authority (rule id BUILDING_NEEDS_GATE: a
+``building`` doc's header carries no red-gate commit sha). ``--template``
+exempts angle-bracket placeholders and the literal ``YYYY-MM-DD`` so the
+bundled template itself can be linted; every other rule stays active
+under it. A path that cannot be read as UTF-8 text reports one
+UNREADABLE finding for itself instead of raising.
 Exit 0 when there are no findings, 1 when there are findings (errors,
 or warnings too under --strict), 2 on a usage error. Human output is
 one line per finding: ``<path>:<line>: <RULE_ID> <message>``. ``--json``
@@ -27,6 +29,7 @@ object per file when a directory was given. Deterministic; no network.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -80,6 +83,9 @@ NOTE_START_RE = re.compile(r"^(\d+)\.\s+")
 H3_RE = re.compile(r"^###\s+\S")
 BOLD_LED_RE = re.compile(r"^\*\*[^*]+\*\*")
 ANGLE_PLACEHOLDER_RE = re.compile(r"<[^<>]+>")
+RED_GATE_LINE_RE = re.compile(
+    r"^Red gate:\s+([0-9a-fA-F]{7,40})\s+(\d{4}-\d{2}-\d{2})\s*$"
+)
 
 
 def read_text_tolerant(path: str) -> str:
@@ -296,56 +302,134 @@ def parse_table_data_rows(lines: List[str], start: int, end: int) -> List[Tuple[
     return out
 
 
+REQUIRED_ACCEPTANCE_COLUMNS = ("given", "when", "then")
+NAMED_ACCEPTANCE_COLUMNS = REQUIRED_ACCEPTANCE_COLUMNS + ("row",)
+
+
+def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optional[int]]]:
+    """Column name -> 0-based index for one SS6 acceptance-table header, or
+    None when the header does not qualify as an acceptance table at all.
+
+    Columns are matched by HEADER NAME, case-insensitive and trimmed, never
+    by position — a real doc's header can read ``# | Label | Given | When |
+    Then`` (an extra column before Given) or carry ``Row`` anywhere, and
+    still qualify. The id column is always the first cell, and must be
+    ``#``, ``ID`` or ``AT`` (case-insensitive) — this one column is
+    positional by definition, not looked up by name. ``Given``, ``When``
+    and ``Then`` must each appear by name somewhere in the header (any
+    order); a header missing one of them does not qualify, the same as no
+    table at all. ``Row`` is optional: its index when a column is named
+    ``Row``, else None, so a doc with no Row column reads every row's
+    ``row`` as None rather than misreading some other column. Any other
+    header cell (``Label``, ``Notes``, ...) sits in the table but is never
+    read into a named field. A header that names ``Given``, ``When``,
+    ``Then`` or ``Row`` more than once does not qualify either — there is
+    no rule for which occurrence is "the" column, so this never guesses;
+    ACCEPTANCE_TABLE reports it the same as a header missing one of them.
+    """
+    if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
+        return None
+    by_name: Dict[str, int] = {}
+    duplicated: set = set()
+    for i, cell in enumerate(header_cells):
+        key = cell.strip().lower()
+        if not key:
+            continue
+        if key in by_name:
+            duplicated.add(key)
+        else:
+            by_name[key] = i
+    if duplicated & set(NAMED_ACCEPTANCE_COLUMNS):
+        return None
+    for name in REQUIRED_ACCEPTANCE_COLUMNS:
+        if name not in by_name:
+            return None
+    mapping: Dict[str, Optional[int]] = {"id": 0}
+    mapping.update({name: by_name[name] for name in REQUIRED_ACCEPTANCE_COLUMNS})
+    mapping["row"] = by_name.get("row")
+    return mapping
+
+
 def find_acceptance_tables(
     lines: List[str], start: int, end: int
-) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]]]]:
-    """Tables in [start, end) that qualify as SS6's acceptance table.
+) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]], Optional[Dict[str, Optional[int]]]]]:
+    """Every #/ID/AT-headed candidate table in [start, end), qualifying or not.
 
-    A table qualifies when its header's first cell is ``#``/``ID``/``AT``
-    (case-insensitive, matching ``parse_table_data_rows``) *and* the header
-    has 4 or 5 cells (``Given``, ``When``, ``Then``, optional ``Row``). A
-    first-cell match at the wrong width does not qualify — ACCEPTANCE_TABLE
-    reports it the same as no table at all. Returns a list of
-    (header_line, header_cells, data_rows), each already separator-stripped.
+    A table is a candidate the instant its header's first cell is
+    #/ID/AT -- acceptance_column_map then says whether it QUALIFIES (a
+    dict) or not (None -- missing or duplicate Given/When/Then/Row). Every
+    candidate is returned either way, so a malformed table is still
+    reported by ACCEPTANCE_TABLE even when a sibling table in the same
+    section qualifies fine -- the two are never conflated into one verdict
+    for the section. A table whose first cell does not match at all is not
+    a candidate (a Decisions-style table, say) and is not returned. Returns
+    a list of (header_line, header_cells, data_rows, column_map_or_None),
+    each already separator-stripped.
     """
     found = []
     for table in split_tables(lines, start, end):
         header_line, header_cells = table[0]
         if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
             continue
-        if len(header_cells) not in (4, 5):
-            continue
+        column_map = acceptance_column_map(header_cells)
         body = table[1:]
         if body and is_separator(body[0][1]):
             body = body[1:]
-        found.append((header_line, header_cells, body))
+        found.append((header_line, header_cells, body, column_map))
     return found
 
 
+def _cell_at(cells: List[str], idx: Optional[int]) -> str:
+    """cells[idx], or "" when idx is None or past the row's own length --
+    a short row (ACCEPTANCE_TABLE's own concern) never raises here."""
+    return cells[idx] if idx is not None and idx < len(cells) else ""
+
+
 def parse_acceptance_rows(lines: List[str]) -> List[Dict[str, Any]]:
-    """Well-formed SS6 rows (id, given, when, then, row) keyed on ``AT-\\d+``."""
+    """Well-formed SS6 rows (id, given, when, then, row) keyed on AT-\\d+.
+
+    Reuses find_acceptance_tables so a table is a candidate on exactly the
+    same terms ACCEPTANCE_TABLE judges it by. A QUALIFYING header (see
+    acceptance_column_map) is read by name -- an extra column (a Label) or
+    a reordered Row never shifts what a cell means, and row is None
+    whenever no header cell is named Row. A candidate whose header does
+    NOT qualify (missing or duplicate Given/When/Then/Row --
+    ACCEPTANCE_TABLE reports the header itself as broken) still
+    contributes its row ids, for SCENARIOS_COUNT's count and
+    TAGS_RESOLVE's lookup -- but ONLY that: given/when/then come back
+    empty and row comes back None, never a value read from a position
+    that might belong to an entirely different column (the concrete
+    failure this guards: a duplicate Then column, read positionally, put
+    the second Then's text into row).
+    """
     bounds = section_bounds(lines, 6)
     if bounds is None:
         return []
     start, end = bounds
     rows = []
-    for line_no, cells in parse_table_data_rows(lines, start + 1, end):
-        if not cells or not AT_ID_RE.match(cells[0]):
-            continue
-        given = cells[1] if len(cells) > 1 else ""
-        when = cells[2] if len(cells) > 2 else ""
-        then = cells[3] if len(cells) > 3 else ""
-        row_col = cells[4].strip() if len(cells) > 4 and cells[4].strip() else None
-        rows.append(
-            {
-                "line": line_no,
-                "id": cells[0],
-                "given": given,
-                "when": when,
-                "then": then,
-                "row": row_col,
-            }
-        )
+    for header_line, header_cells, body, column_map in find_acceptance_tables(lines, start + 1, end):
+        for line_no, cells in body:
+            if not cells or not AT_ID_RE.match(cells[0]):
+                continue
+            if column_map is None:
+                rows.append(
+                    {"line": line_no, "id": cells[0], "given": "", "when": "", "then": "", "row": None}
+                )
+                continue
+            given = _cell_at(cells, column_map["given"])
+            when = _cell_at(cells, column_map["when"])
+            then = _cell_at(cells, column_map["then"])
+            row_text = _cell_at(cells, column_map["row"]).strip()
+            rows.append(
+                {
+                    "line": line_no,
+                    "id": cells[0],
+                    "given": given,
+                    "when": when,
+                    "then": then,
+                    "row": row_text or None,
+                }
+            )
     return rows
 
 
@@ -650,22 +734,57 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
         # HEADINGS_BARE already reports a missing "## 6." heading.
         return []
     start, end = bounds
-    tables = find_acceptance_tables(lines, start + 1, end)
+    tables = find_acceptance_tables(lines, start + 1, end)  # every candidate, qualifying or not
     if not tables:
         return [
             finding(
                 "ACCEPTANCE_TABLE",
                 start + 1,
-                "SS6 has no acceptance table (need a header whose first cell is "
-                "'#', 'ID' or 'AT', with 4 or 5 columns)",
+                "SS6 has no acceptance table (need a header row whose first cell is "
+                "'#', 'ID' or 'AT' and which names Given, When and Then)",
                 "error",
             )
         ]
 
+    qualifying = [t for t in tables if t[3] is not None]
+    malformed = [t for t in tables if t[3] is None]
+
     out: List[Dict[str, Any]] = []
+
+    if not qualifying:
+        # Every #/ID/AT-headed candidate failed its own header check --
+        # report each on the "no acceptance table" terms (matches the
+        # single-candidate case's long-standing message), at its own line.
+        for header_line, _header_cells, _body, _column_map in malformed:
+            out.append(
+                finding(
+                    "ACCEPTANCE_TABLE",
+                    header_line,
+                    "SS6 has no acceptance table (need a header row whose first cell is "
+                    "'#', 'ID' or 'AT' and which names Given, When and Then)",
+                    "error",
+                )
+            )
+        return out
+
+    # At least one candidate qualifies: a malformed SIBLING is reported on
+    # its own terms -- never silently dropped just because another table
+    # in the same section is fine (that used to make a duplicate-column
+    # sibling produce zero findings at all).
+    for header_line, _header_cells, _body, _column_map in malformed:
+        out.append(
+            finding(
+                "ACCEPTANCE_TABLE",
+                header_line,
+                "a second acceptance-shaped table's header does not qualify — Given, When "
+                "and Then must each appear exactly once (Row at most once)",
+                "error",
+            )
+        )
+
     total_rows = 0
-    cell_names = ("Given", "When", "Then")
-    for header_line, header_cells, body in tables:
+    required_cell_names = ("Given", "When", "Then")
+    for header_line, header_cells, body, column_map in qualifying:
         width = len(header_cells)
         for line_no, cells in body:
             total_rows += 1
@@ -679,8 +798,9 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
                     )
                 )
                 continue
-            for offset, name in enumerate(cell_names, start=1):
-                if not cells[offset].strip():
+            for name in required_cell_names:
+                idx = column_map[name.lower()]
+                if not cells[idx].strip():
                     out.append(
                         finding(
                             "ACCEPTANCE_TABLE",
@@ -691,7 +811,7 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
                     )
     if total_rows == 0:
         out.append(
-            finding("ACCEPTANCE_TABLE", tables[0][0], "acceptance table has no data rows", "error")
+            finding("ACCEPTANCE_TABLE", qualifying[0][0], "acceptance table has no data rows", "error")
         )
     return out
 
@@ -785,6 +905,70 @@ def check_untested_on_agreed(lines: List[str]) -> List[Dict[str, Any]]:
         )
         for r in records
         if r["tags"] == ["UNTESTED"]
+    ]
+
+
+def check_building_needs_gate(lines: List[str]) -> List[Dict[str, Any]]:
+    """`building` records the human-confirmed act that earned the status: the
+    red-gate commit, as its own header line matching ``RED_GATE_LINE_RE``
+    exactly — ``Red gate: <sha> <YYYY-MM-DD>``, sha 7-40 hex characters
+    (digits alone qualify), date a real calendar date. Error when `Status:`
+    is `building` and no line in the header block (everything before the
+    first ``## `` heading, skipping any fenced ``` ```/``~~~`` block the same
+    way ``framework_section.py`` skips one) matches it. Position among the
+    header lines is not enforced, the line's own shape is: a hex-looking run
+    inside some other header value (``Supersedes: deadbeef``, a digit-only
+    ``Last decision:``) does not satisfy it, nor does a ``Red gate:`` line
+    sitting inside a fenced code block (an illustration, not the doc's own
+    header) — only a real, unfenced ``Red gate:`` line with a real date
+    does. A line matching the sha/date shape but naming a date that does not
+    exist (a day past the last of its month) is reported on its own terms, not silently
+    treated as no line at all.
+    """
+    status = get_status(lines)
+    if status != "building":
+        return []
+
+    header_end = find_line_index(lines, lambda l: l.startswith("## "))
+    if header_end is None:
+        header_end = len(lines)
+
+    bad_date_finding: Optional[Dict[str, Any]] = None
+    in_fence = False
+    for i in range(header_end):
+        stripped = lines[i].lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = RED_GATE_LINE_RE.match(lines[i])
+        if not m:
+            continue
+        date_text = m.group(2)
+        try:
+            datetime.date.fromisoformat(date_text)
+        except ValueError:
+            if bad_date_finding is None:
+                bad_date_finding = finding(
+                    "BUILDING_NEEDS_GATE",
+                    i + 1,
+                    f"'Red gate:' line found, but {date_text!r} is not a real calendar date",
+                    "error",
+                )
+            continue
+        return []  # a real, unfenced Red gate line with a real date clears the rule
+
+    if bad_date_finding is not None:
+        return [bad_date_finding]
+    return [
+        finding(
+            "BUILDING_NEEDS_GATE",
+            1,
+            "arm records the red-gate commit in the header as its own line "
+            "'Red gate: <sha> <YYYY-MM-DD>'; none found",
+            "error",
+        )
     ]
 
 
@@ -932,6 +1116,7 @@ RULE_CHECKS = (
     check_scenarios_count,
     check_why_line,
     check_untested_on_agreed,
+    check_building_needs_gate,
     check_agent_notes_many,
     check_human_half_budget,
 )

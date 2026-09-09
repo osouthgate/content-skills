@@ -252,7 +252,7 @@ Semantics the mode files rely on:
 | Doc status | Without a map | With a map |
 |---|---|---|
 | `draft` | Doc is the only home. §6 rows are the promise. | Same. Nothing is filed in the map yet. |
-| `agreed` (human act) | — | `arm` files each §6 row as a **not-built row** per the recipe. A person groups AT rows into rows **by the §0 rule each row is tagged from** — a rule is the promise at story grain — one row = one story, 1–5 scenarios; more is a chain with a parent; rows no rule cites are one group the person places. §6 gains a `Row` column and a snapshot line, and is not edited again: it is the record of what was agreed, the map is the live source. §0 tags keep AT aliases. A staleness check between the two is planned (§14). |
+| `agreed` (human act) | — | `arm` files each §6 row as a **not-built row** per the recipe. A person groups AT rows into rows **by the §0 rule each row is tagged from** — a rule is the promise at story grain — one row = one story, 1–5 scenarios; more is a chain with a parent; rows no rule cites are one group the person places. §6 gains a `Row` column and a snapshot line, and is not edited again: it is the record of what was agreed, the map is the live source. §0 tags keep AT aliases. `bridge_validate.py` (§10) is the staleness check between the two: Row ids against `rowIdPattern`, every AT row mapped, the snapshot line present, and each row's `Then` against the map's current text. |
 | `building` | Red tests written and committed first; failing output pasted in §6; sha in header. | Same, plus each red test is cited in the lane its altitude picks. |
 | `shipped` | Human flips it when §6 rows are green. | Human flips it when **every** bridged row is `proven` at its `Then`'s altitude. `reconcile` is how rows get there. Doc keeps §0, §2, §4 as the living record. |
 
@@ -285,10 +285,11 @@ parseable value. A directory lints every `*.md` containing `## 0. TLDR`.
 | `RULES_TAGGED` | Every rule ends with `→ AT-n[, AT-m…]` or `→ UNTESTED`. | error |
 | `TAGS_RESOLVE` | Every `AT-n` cited in a §0 tag exists as a row id in §6. | error |
 | `AT_IDS_UNIQUE` | §6 row ids are unique and match `AT-\d+`. | error |
-| `ACCEPTANCE_TABLE` | §6 holds at least one acceptance table — header first cell `#`, `ID` or `AT`, four or five columns — with at least one data row; every data row has the right cell count and non-empty Given, When and Then. Other tables in §6 are ignored. | error |
+| `ACCEPTANCE_TABLE` | §6 holds at least one acceptance table — a header row whose first cell is `#`, `ID` or `AT` and which names `Given`, `When` and `Then` exactly once each (any order, case-insensitive, extra columns allowed, an optional `Row` column recognised by name, also at most once) — with at least one data row; every data row has the right cell count and non-empty Given, When and Then. Columns are matched by header name, never position, so an extra column or a reordered `Row` never shifts what a cell means, and a header naming a column twice does not qualify — never a guessed mapping. Every `#`/`ID`/`AT`-headed table in §6 is checked on its own terms: a malformed table is reported even when a sibling table in the same section qualifies fine. Other, non-`#`/`ID`/`AT` tables in §6 are ignored. | error |
 | `SCENARIOS_COUNT` | The `**Scenarios:**` line's acceptance-row count equals the number of §6 rows. The worked-example count is checked only if §3 examples are parseable (`### ` or bold-led blocks); otherwise `warn` that it was not checked. | error / warn |
 | `WHY_LINE` | §4, §5, §6, §7 each contain a line beginning `Why — what breaks without it:`. | error |
 | `UNTESTED_ON_AGREED` | A rule tagged `UNTESTED` while `Status:` is `agreed`, `building` or `shipped`. | error |
+| `BUILDING_NEEDS_GATE` | `Status:` is `building` and no header line (any line before the first `## ` heading, skipping anything inside a ` ``` `/`~~~` fence) matches `Red gate: <sha> <YYYY-MM-DD>` exactly — sha 7–40 hex characters (digits alone qualify), date a real calendar date (checked with Python's own date parser, not just the `\d{4}-\d{2}-\d{2}` shape); position among the header lines is not enforced, the line's own shape is. A hex-looking run inside another header value (`Supersedes: deadbeef`, a digit-only `Last decision:`), a `Red gate:` line inside a fenced code block, or one naming a date that does not exist (`2026-02-31`) does not satisfy it — the last of these is its own message, not silently treated as no line at all. | error |
 | `PLACEHOLDER` | `TBD`, `TODO`, `<fill`, `decide later` inside §0; any `<…>` placeholder in §0, in the `Owner:` / `Last decision:` values, or in a §6 data cell; a literal `YYYY-MM-DD`. `--template` exempts the angle-bracket and date placeholders so the bundled template can be linted; every other rule stays active. A copied, unfilled template therefore fails a normal lint. | error |
 | `UNREADABLE` | The path cannot be read or is not valid UTF-8 — one finding for the file, never a traceback. | error |
 | `AGENT_NOTES_MANY` | More than 8 numbered agent notes under §0. | warn |
@@ -314,6 +315,46 @@ a compact table. This is what
 the §3 example count when countable), idempotently — the count is agent-maintained
 metadata, so a script may own it; `--search "<text>" --dir <docsHome>` ranks every §6 row
 and §0 rule across the docs by token overlap — intake's matcher when no map is configured.
+
+### `bridge_validate.py` — the bridge's check
+
+```
+python3 "${CLAUDE_SKILL_DIR}/scripts/bridge_validate.py" <doc.md> [--cwd <path>] [--json] [--strict]
+```
+
+Checks a bridged doc's §6 against the project's map. Config is resolved exactly as
+`orient.py`/`adapter.py` do, under `--cwd`. Every `map.row` lookup runs through
+`adapter.py --json row <id>` rather than a shell string composed from configuration
+plus doc content, so a row id — however it is spelled — always travels as one argv
+element.
+
+Checked in this order — NOT_BRIDGED before MAP_NOT_CONFIGURED, because a doc
+still at `draft`/`superseded-by` has not been bridged regardless of whether a
+map exists to bridge it to:
+
+| Rule id | Checks | Severity |
+|---|---|---|
+| `UNREADABLE` | DOC is missing or not valid UTF-8. | error |
+| `NOT_BRIDGED` | `Status:` is `draft` or `superseded-by` — the bridge has not happened. Reports `bridged: false`; no other rule runs. | info |
+| `MAP_NOT_CONFIGURED` | No `map` in the config, or no config at all — nothing to validate against. | error |
+| `ROW_MISSING` | An AT row's `Row` cell is empty while `Status:` is `agreed`, `building` or `shipped`. | error |
+| `ROW_ID_FORMAT` | A `Row` value does not match `map.rowIdPattern`. | error |
+| `NO_ROW_ID_PATTERN` | `map.rowIdPattern` is not configured; `ROW_ID_FORMAT` is skipped. | warn |
+| `INVALID_ROW_ID_PATTERN` | `map.rowIdPattern` is configured but does not compile as a regex — the exception text is carried in the message; `ROW_ID_FORMAT` is skipped, same as absence, but this is a misconfiguration, never silently treated as "no pattern". | error |
+| `ROW_NOT_FOUND` | `map.row` is configured and `adapter.py row <id>` reports a non-zero exit or empty stdout. | error |
+| `NO_MAP_ROW_COMMAND` | `map.row` is not configured; the drift check against the map is skipped. | warn |
+| `SNAPSHOT_LINE_MISSING` | §6 has no line starting `Snapshot taken at` (a leading backtick or asterisk tolerated). | error |
+| `THEN_NOT_IN_MAP` | A row's normalised `Then` is not a substring of its `Row` id's normalised current text in the map. | warn |
+
+`--strict` promotes every warn to error. Exit 0 with no error-severity finding; 1 with
+any error (or, under `--strict`, any warning); 2 on a usage error. Human output is one
+line per finding, then a summary line `bridge: <n> rows, <m> mapped, <k> drifted`.
+`--json` prints one object: `{"path", "status", "bridged", "mapConfigured", "rows":
+[{"id", "row", "line", "found", "inSync"}], "findings": [{"rule", "line", "message",
+"severity"}], "stats": {"rows", "mapped", "drifted", "errors", "warnings"}}`. `arm` runs
+it once the `Row` column and snapshot line are written, and fixes every error before
+continuing; `reconcile` runs it before reading the map, because a `THEN_NOT_IN_MAP`
+finding means §6 no longer says what the map says.
 
 ## 11. Rules for every file in this skill
 
@@ -391,7 +432,8 @@ is not adopted, and continues with the requested mode either way.
 Shipped: `orient.py`, `lint_outcome.py`, `outcome_rows.py`, `adopt.py`,
 `framework_section.py`, `adapter.py` (runs every configured command with the user's text
 as one argument — never a composed shell string), `render_outcome.py` (instantiates the
-template; refuses to overwrite).
+template; refuses to overwrite), `bridge_validate.py` (§10: checks a bridged doc's §6
+Row ids, snapshot line and `Then` text against the project's current map).
 
 Planned, in the order they pay back. Each replaces a step a mode currently performs by
 reading prose, so drift is the cost of not having it:
@@ -400,7 +442,6 @@ reading prose, so drift is the cost of not having it:
 |---|---|---|
 | `inspect_outcome.py DOC` | status, BLOCKING count, lint result, §0 text, note count, UNTESTED rules, counts, Row references — one JSON for every close-out | new, revise, review, arm, reconcile |
 | `diff_outcome.py BEFORE AFTER` | the three erosion classes and status movement, as a diff the model then judges | revise, review, merge |
-| `bridge_validate.py DOC` | Row ids against `rowIdPattern`, every AT row mapped, the §6 snapshot against the map's current scenarios | arm, reconcile |
 | `evidence_probe.py --ref PR\|SHA\|BRANCH\|FILE` | changed files, declared row ids, cited and uncited test titles, ranked candidates | reconcile, intake |
 | `kill_witness.py --test … --mutation …` | clean-tree check, apply the approved mutation, capture the named failure, restore exactly, rerun green, print the witness | intake, reconcile |
 | `arm_gate.py DOC --branch SLUG` | the Git preflight, the red run, staged-path inspection, the explicit-path commit | arm |
