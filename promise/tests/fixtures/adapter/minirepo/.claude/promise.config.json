@@ -1,0 +1,19 @@
+{
+  "$schema": "promise.config/v1",
+  "commands": {
+    "typeCheck": "python3 ../scripts/ok.py",
+    "test": "python3 ../scripts/ok.py",
+    "lint": "python3 ../scripts/ok.py"
+  },
+  "map": {
+    "recipe": "docs/how-to/adding-a-row.md",
+    "find": "python3 ../scripts/echo_args.py",
+    "row": "python3 ../scripts/echo_args.py",
+    "nextId": "python3 ../scripts/echo_args.py",
+    "rowIdPattern": "^C\\d+[a-z]?$",
+    "checks": [
+      "python3 ../scripts/ok.py",
+      "python3 ../scripts/ok.py"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "promise",
+  "description": "Carry a capability from intent to proof in one skill. An outcome doc records the promise first: the human's outcome line, rules and success signal enter verbatim into a protected §0 TLDR, and the agent derives invariants, mechanism with file:line evidence, Given/When/Then acceptance rows and build phases. Where a project keeps a machine-checked capability map, `agreed` files those rows into it, `arm` commits them as red tests, `intake` routes feedback onto existing promises instead of new documents, and `reconcile` moves a row's verdict only when the evidence reaches the altitude its own Then claims. Eight modes behind one thin router, mode files loaded on demand, Python scripts for orientation, shape linting and row extraction, and a per-project config instead of a fork. Supersedes the `outcome` plugin.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "planning",
+    "design-docs",
+    "outcome-driven",
+    "invariants",
+    "acceptance-tests",
+    "gherkin",
+    "capability-map",
+    "feedback-intake",
+    "verification",
+    "spec",
+    "review",
+    "claude-code"
+  ]
+}

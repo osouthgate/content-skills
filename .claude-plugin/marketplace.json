@@ -27,7 +27,12 @@
     {
       "name": "outcome",
       "source": "./outcome",
-      "description": "Turn a requirement, idea, or transcript into ONE outcome doc per capability: a protected 60-second §0 TLDR (outcome, verbatim rules mapped to acceptance-test IDs, success signal), then agent-derived invariants, mechanism with file:line evidence, Given/When/Then acceptance, and build phases. Includes a code-verified review rubric for docs authored elsewhere and a red-test arm mode."
+      "description": "SUPERSEDED by `promise` (same Outcome Framework, seven modes, scripts, per-project config). Kept for one release. Turn a requirement, idea, or transcript into ONE outcome doc per capability: a protected 60-second §0 TLDR (outcome, verbatim rules mapped to acceptance-test IDs, success signal), then agent-derived invariants, mechanism with file:line evidence, Given/When/Then acceptance, and build phases. Includes a code-verified review rubric for docs authored elsewhere and a red-test arm mode."
+    },
+    {
+      "name": "promise",
+      "source": "./promise",
+      "description": "Carry a capability from intent to proof in one skill. The human's outcome, rules and success signal enter verbatim into a protected §0 TLDR; the agent derives invariants, mechanism with file:line evidence, Given/When/Then acceptance rows and build phases. Where the project keeps a machine-checked capability map, `agreed` files the rows into it, `arm` commits them as red tests, `intake` routes feedback onto existing promises, and `reconcile` moves a verdict only when the evidence reaches the altitude the row's own Then claims. One thin router, seven mode files loaded on demand, Python scripts for orientation, shape linting and row extraction, and a per-project config instead of a fork. Supersedes `outcome`."
     }
   ]
 }

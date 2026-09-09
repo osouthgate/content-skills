@@ -1,6 +1,8 @@
 ---
 name: outcome
 description: |
+  SUPERSEDED by the `promise` plugin (same framework, seven modes). If `/promise` is
+  available in this session, use it instead of this skill.
   Turn a requirement/idea/request/transcript into ONE outcome doc per capability using
   the Outcome Framework (outcome-framework.md bundled beside this skill): human half
   verbatim first (§0 TLDR — outcome line, rules as bullets, how-we'll-know — then
