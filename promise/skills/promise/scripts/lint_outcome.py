@@ -82,7 +82,9 @@ NOTE_START_RE = re.compile(r"^(\d+)\.\s+")
 H3_RE = re.compile(r"^###\s+\S")
 BOLD_LED_RE = re.compile(r"^\*\*[^*]+\*\*")
 ANGLE_PLACEHOLDER_RE = re.compile(r"<[^<>]+>")
-COMMIT_SHA_RE = re.compile(r"\b[0-9a-fA-F]{7,40}\b")
+RED_GATE_LINE_RE = re.compile(
+    r"^Red gate:\s+([0-9a-fA-F]{7,40})\s+(\d{4}-\d{2}-\d{2})\s*$"
+)
 
 
 def read_text_tolerant(path: str) -> str:
@@ -300,6 +302,7 @@ def parse_table_data_rows(lines: List[str], start: int, end: int) -> List[Tuple[
 
 
 REQUIRED_ACCEPTANCE_COLUMNS = ("given", "when", "then")
+NAMED_ACCEPTANCE_COLUMNS = REQUIRED_ACCEPTANCE_COLUMNS + ("row",)
 
 
 def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optional[int]]]:
@@ -318,16 +321,25 @@ def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optiona
     ``Row``, else None, so a doc with no Row column reads every row's
     ``row`` as None rather than misreading some other column. Any other
     header cell (``Label``, ``Notes``, ...) sits in the table but is never
-    read into a named field. A name repeated in the header keeps its first
-    occurrence.
+    read into a named field. A header that names ``Given``, ``When``,
+    ``Then`` or ``Row`` more than once does not qualify either — there is
+    no rule for which occurrence is "the" column, so this never guesses;
+    ACCEPTANCE_TABLE reports it the same as a header missing one of them.
     """
     if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
         return None
     by_name: Dict[str, int] = {}
+    duplicated: set = set()
     for i, cell in enumerate(header_cells):
         key = cell.strip().lower()
-        if key and key not in by_name:
+        if not key:
+            continue
+        if key in by_name:
+            duplicated.add(key)
+        else:
             by_name[key] = i
+    if duplicated & set(NAMED_ACCEPTANCE_COLUMNS):
+        return None
     for name in REQUIRED_ACCEPTANCE_COLUMNS:
         if name not in by_name:
             return None
@@ -869,23 +881,28 @@ def check_untested_on_agreed(lines: List[str]) -> List[Dict[str, Any]]:
 
 def check_building_needs_gate(lines: List[str]) -> List[Dict[str, Any]]:
     """`building` records the human-confirmed act that earned the status: the
-    red-gate commit. Warn when the header (every line before ``## 0.``)
-    carries no 7-40 character hexadecimal run — `arm` writes it as
-    ``Red gate: <sha> <YYYY-MM-DD>``, directly under ``Supersedes:``."""
+    red-gate commit, as its own header line matching ``RED_GATE_LINE_RE``
+    exactly — ``Red gate: <sha> <YYYY-MM-DD>``, sha 7-40 hex characters
+    (digits alone qualify), date ``YYYY-MM-DD``. Error when `Status:` is
+    `building` and no line before ``## 0.`` matches it. Position among the
+    header lines is not enforced, the line's own shape is: a hex-looking run
+    inside some other header value (``Supersedes: deadbeef``, a digit-only
+    ``Last decision:``) does not satisfy it — only a real ``Red gate:`` line
+    does."""
     status = get_status(lines)
     if status != "building":
         return []
     tldr_idx = find_line_index(lines, lambda l: l.startswith(TLDR_HEADING))
     header_end = tldr_idx if tldr_idx is not None else len(lines)
-    if any(COMMIT_SHA_RE.search(line) for line in lines[:header_end]):
+    if any(RED_GATE_LINE_RE.match(line) for line in lines[:header_end]):
         return []
     return [
         finding(
             "BUILDING_NEEDS_GATE",
             1,
-            "arm records the red-gate commit in the header as "
+            "arm records the red-gate commit in the header as its own line "
             "'Red gate: <sha> <YYYY-MM-DD>'; none found",
-            "warn",
+            "error",
         )
     ]
 

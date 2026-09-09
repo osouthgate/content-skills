@@ -18,20 +18,20 @@ trips. fake_row.py stands in for a project's `map.row` command.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 TESTS_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = TESTS_DIR / "fixtures" / "bridge"
 SCRIPTS_DIR = TESTS_DIR.parent / "skills" / "promise" / "scripts"
 
 BRIDGE = SCRIPTS_DIR / "bridge_validate.py"
-ADAPTER = SCRIPTS_DIR / "adapter.py"
 LINT = SCRIPTS_DIR / "lint_outcome.py"
 FAKE_ROW = FIXTURES_DIR / "fake_row.py"
 
@@ -48,19 +48,39 @@ FIXTURE_NAMES = (
 )
 
 
-def run(*args: str, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
+def run(
+    *args: str, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None
+) -> subprocess.CompletedProcess:
+    """Run bridge_validate.py as a real subprocess. `env`, when given, is
+    merged onto a copy of this process's own environment (never replaces it
+    outright) — so FAKE_ROW_LOG reaches fake_row.py at the bottom of the
+    real bridge_validate.py -> adapter.py -> fake_row.py chain, since none
+    of the three subprocess calls in that chain override `env` themselves."""
+    full_env = {**os.environ, **env} if env is not None else None
     return subprocess.run(
         [sys.executable, str(BRIDGE), *args],
         capture_output=True,
         text=True,
         cwd=cwd,
+        env=full_env,
     )
 
 
-def run_json(*args: str) -> Tuple[subprocess.CompletedProcess, dict]:
-    result = run(*args)
+def run_json(
+    *args: str, env: Optional[Dict[str, str]] = None
+) -> Tuple[subprocess.CompletedProcess, dict]:
+    result = run(*args, env=env)
     data = json.loads(result.stdout) if result.stdout.strip() else None
     return result, data
+
+
+def read_invocation_log(path: Path) -> List[list]:
+    """Every fake_row.py invocation logged to `path` (FAKE_ROW_LOG), as a
+    list of argv lists, in call order. Empty when fake_row.py was never
+    actually invoked (the file is never created otherwise)."""
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def write_config(project_dir: Path, config: dict) -> None:
@@ -214,16 +234,25 @@ class DriftTests(unittest.TestCase):
         self.assertFalse(by_id["AT-3"]["inSync"])
 
     def test_adapter_called_once_per_distinct_row_id(self) -> None:
-        # R1 covers both AT-1 and AT-2; a correct cache calls adapter.py's
-        # row op once for R1 and once for R2, never twice for the same id.
-        # Verified indirectly: the human summary's mapped/drifted counts are
-        # only correct if every row was actually looked up, and a duplicate
-        # lookup would not change that count — so this asserts the visible
-        # behaviour a caching bug would not affect, documenting the cache is
-        # a performance property rather than one the CLI surface exposes.
-        result = run(str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(self.project))
+        # R1 covers both AT-1 and AT-2; a correct cache calls fake_row.py
+        # once for R1 and once for R2, never twice for the same id. Proven
+        # through fake_row.py's own invocation log, written by the real
+        # bridge_validate.py -> adapter.py -> fake_row.py chain — not from
+        # output text (mapped/drifted counts) that a duplicate lookup would
+        # not change either way, so could pass even with a broken cache.
+        log_path = self.project / "fake_row.log"
+        result = run(
+            str(FIXTURES_DIR / "agreed_bridged.md"),
+            "--cwd", str(self.project),
+            env={"FAKE_ROW_LOG": str(log_path)},
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("bridge: 3 rows, 3 mapped, 1 drifted", result.stdout)
+        invocations = read_invocation_log(log_path)
+        row_ids = [argv[-1] for argv in invocations]
+        # Exactly one invocation each for R1 and R2 -- a broken cache would
+        # invoke R1 twice (once for AT-1, once for AT-2), giving three
+        # entries, which sorted(row_ids) == ["R1", "R2"] would catch.
+        self.assertEqual(sorted(row_ids), ["R1", "R2"], row_ids)
 
 
 class MapNotConfiguredTests(unittest.TestCase):
@@ -249,6 +278,22 @@ class MapNotConfiguredTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 1)
             self.assertEqual([f["rule"] for f in data["findings"]], ["MAP_NOT_CONFIGURED"])
+
+    def test_draft_with_no_config_is_not_bridged_not_map_not_configured(self) -> None:
+        # Precedence: NOT_BRIDGED is checked before MAP_NOT_CONFIGURED. A
+        # draft doc has not been bridged regardless of whether a map is
+        # configured, so an empty project (no config at all) must still
+        # report NOT_BRIDGED, never MAP_NOT_CONFIGURED, and exit 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            result, data = run_json(
+                str(FIXTURES_DIR / "draft_unbridged.md"), "--cwd", tmp, "--json"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual([f["rule"] for f in data["findings"]], ["NOT_BRIDGED"])
+            self.assertEqual(data["findings"][0]["severity"], "info")
+            self.assertEqual(data["status"], "draft")
+            self.assertFalse(data["bridged"])
+            self.assertFalse(data["mapConfigured"])
 
 
 class UnreadableTests(unittest.TestCase):
@@ -282,24 +327,46 @@ class UnreadableTests(unittest.TestCase):
 
 
 class HostileRowIdTests(unittest.TestCase):
-    """A hostile Row cell fails ROW_ID_FORMAT under the real pattern, and —
-    relaxed so the lookup is attempted — reaches fake_row.py as exactly one
-    argv element, never as text a shell parses."""
+    """A hostile Row cell fails ROW_ID_FORMAT under the real pattern; relaxed
+    so a lookup is attempted, it reaches fake_row.py as exactly one argv
+    element through the real bridge_validate.py -> adapter.py -> fake_row.py
+    path (shell=False throughout every one of those three subprocess calls),
+    never as text a shell parses."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.project = Path(self._tmp.name)
-        base = (FIXTURES_DIR / "agreed_bridged.md").read_text(encoding="utf-8")
-        hostile = base.replace(
-            "| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | R1 |",
-            f"| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | {HOSTILE_ROW} |",
-        )
-        self.assertNotEqual(hostile, base)
-        self.doc = self.project / "hostile.md"
-        self.doc.write_text(hostile, encoding="utf-8")
         self.marker = self.project / "PWNED"
         self.addCleanup(lambda: self.marker.unlink(missing_ok=True))
+        # A payload that WOULD create `self.marker` if it were ever naively
+        # embedded in a double-quoted shell argument -- `touch`, not a mere
+        # `echo`, so its absence afterwards is real evidence: a payload
+        # whose worst case only prints something proves nothing either way.
+        self.hostile = f'R1"; touch {self.marker}; echo "'
+        base = (FIXTURES_DIR / "agreed_bridged.md").read_text(encoding="utf-8")
+        doc_text = base.replace(
+            "| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | R1 |",
+            f"| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | {self.hostile} |",
+        )
+        self.assertNotEqual(doc_text, base)
+        self.doc = self.project / "hostile.md"
+        self.doc.write_text(doc_text, encoding="utf-8")
+
+    def test_payload_is_a_genuine_positive_control(self) -> None:
+        # Before trusting the marker's absence as proof of safety below,
+        # prove the payload really would create it under a real shell —
+        # otherwise a payload that could never create the marker (an
+        # unmatched quote, or a command that only prints) would make that
+        # proof vacuous.
+        self.assertFalse(self.marker.exists())
+        subprocess.run(f'true "{self.hostile}"', shell=True)
+        self.assertTrue(
+            self.marker.exists(),
+            "the payload must be able to create the marker under a real shell, "
+            "or its absence later proves nothing",
+        )
+        self.marker.unlink()
 
     def test_fails_row_id_format_under_the_real_pattern(self) -> None:
         bridged_project(self.project, row_id_pattern=r"^R\d+$")
@@ -307,34 +374,34 @@ class HostileRowIdTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
         self.assertEqual(error_rules, ["ROW_ID_FORMAT"])
-        self.assertFalse(self.marker.exists(), "the hostile Row cell's `echo PWNED` must never run")
+        self.assertFalse(self.marker.exists(), "the hostile Row cell must never reach a shell")
 
-    def test_relaxed_pattern_reaches_fake_row_as_one_argv_element(self) -> None:
+    def test_relaxed_pattern_reaches_fake_row_as_one_argv_element_through_bridge(self) -> None:
         bridged_project(self.project, row_id_pattern=".*")
+        log_path = self.project / "fake_row.log"
+        result, data = run_json(
+            str(self.doc), "--cwd", str(self.project), "--json",
+            env={"FAKE_ROW_LOG": str(log_path)},
+        )
         # bridge_validate.py's own run: no ROW_ID_FORMAT now that the id
         # "matches"; the lookup is attempted and the map genuinely has no
         # such row, so ROW_NOT_FOUND — not a crash, not a shell escape.
-        result, data = run_json(str(self.doc), "--cwd", str(self.project), "--json")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
         self.assertEqual(error_rules, ["ROW_NOT_FOUND"])
-        self.assertFalse(self.marker.exists(), "the hostile Row cell's `echo PWNED` must never run")
+        self.assertFalse(self.marker.exists(), "the hostile Row cell must never reach a shell")
 
-        # Direct adapter.py call (bridge_validate.py's own documented
-        # boundary for every map.row lookup) proves the id arrived as
-        # exactly one argv element: fake_row.py's own argv echo, captured
-        # verbatim in adapter.py's --json "stdout" field.
-        proc = subprocess.run(
-            [sys.executable, str(ADAPTER), "--cwd", str(self.project), "--json", "row", HOSTILE_ROW],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)  # fake_row.py: unknown id
-        adapter_data = json.loads(proc.stdout)
-        self.assertEqual(adapter_data["argv"][-1], HOSTILE_ROW)
-        self.assertEqual(adapter_data["argv"].count(HOSTILE_ROW), 1)
-        self.assertEqual(adapter_data["stdout"].splitlines()[0], repr([HOSTILE_ROW]))
-        self.assertFalse(self.marker.exists(), "the hostile Row cell's `echo PWNED` must never run")
+        # fake_row.py's own invocation log -- written from inside the real
+        # bridge_validate.py -> adapter.py -> fake_row.py chain, not a
+        # direct adapter.py call -- proves the id arrived as exactly one
+        # argv element. The fixture's other two rows (R1, R2) are looked up
+        # too since the pattern is relaxed to `.*`; filter to the hostile
+        # id's own invocation(s) specifically.
+        invocations = read_invocation_log(log_path)
+        hostile_calls = [argv for argv in invocations if argv[-1] == self.hostile]
+        self.assertEqual(len(hostile_calls), 1, invocations)
+        self.assertEqual(len(hostile_calls[0]), 2, hostile_calls[0])  # sys.argv: [fake_row.py, id]
+        self.assertEqual(hostile_calls[0][-1], self.hostile)
 
 
 class NoRowIdPatternTests(unittest.TestCase):
@@ -344,11 +411,59 @@ class NoRowIdPatternTests(unittest.TestCase):
             result, data = run_json(
                 str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(project), "--json"
             )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)  # warns only
             rules = [f["rule"] for f in data["findings"]]
             self.assertIn("NO_ROW_ID_PATTERN", rules)
             self.assertNotIn("ROW_ID_FORMAT", rules)
+            self.assertNotIn("INVALID_ROW_ID_PATTERN", rules)
             warn = next(f for f in data["findings"] if f["rule"] == "NO_ROW_ID_PATTERN")
             self.assertEqual(warn["severity"], "warn")
+
+
+class InvalidRowIdPatternTests(unittest.TestCase):
+    """`map.rowIdPattern` present but not a valid regex is a distinct,
+    error-severity finding from `NO_ROW_ID_PATTERN` (absent) — never
+    silently treated the same way."""
+
+    def test_invalid_pattern_is_an_error_not_a_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = bridged_project(Path(tmp), row_id_pattern="[")  # unterminated char class
+            result, data = run_json(
+                str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(project), "--json"
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            rules = [f["rule"] for f in data["findings"]]
+            self.assertIn("INVALID_ROW_ID_PATTERN", rules)
+            self.assertNotIn("NO_ROW_ID_PATTERN", rules)
+            self.assertNotIn("ROW_ID_FORMAT", rules)
+            finding = next(f for f in data["findings"] if f["rule"] == "INVALID_ROW_ID_PATTERN")
+            self.assertEqual(finding["severity"], "error")
+            self.assertIn("[", finding["message"])
+
+    def test_invalid_pattern_carries_the_regex_exception_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = bridged_project(Path(tmp), row_id_pattern="[")
+            _, data = run_json(str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(project), "--json")
+            finding = next(f for f in data["findings"] if f["rule"] == "INVALID_ROW_ID_PATTERN")
+            # The exact wording is Python's re module's own, and only needs
+            # to be present -- not asserted verbatim, since it is not this
+            # script's to word.
+            self.assertTrue(finding["message"], finding)
+            self.assertIn("does not compile", finding["message"])
+
+    def test_row_id_format_is_skipped_but_the_drift_check_still_runs(self) -> None:
+        # An unusable pattern only disables the FORMAT check (ROW_ID_FORMAT
+        # can't validate against a pattern that doesn't compile) -- it does
+        # not also disable the separate map.row lookup, exactly like a
+        # genuinely absent pattern (NO_ROW_ID_PATTERN) does not either.
+        with tempfile.TemporaryDirectory() as tmp:
+            project = bridged_project(Path(tmp), row_id_pattern="[")
+            _, data = run_json(str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(project), "--json")
+            by_id = {r["id"]: r for r in data["rows"]}
+            self.assertTrue(by_id["AT-1"]["found"])
+            self.assertTrue(by_id["AT-1"]["inSync"])
+            self.assertTrue(by_id["AT-3"]["found"])
+            self.assertFalse(by_id["AT-3"]["inSync"])  # the fixture's known drift, unaffected
 
 
 class NoMapRowCommandTests(unittest.TestCase):

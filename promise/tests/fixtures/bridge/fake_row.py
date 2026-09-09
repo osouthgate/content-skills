@@ -2,6 +2,7 @@
 """Stand-in for a project's `map.row` command, for bridge_validate.py's tests.
 
     python3 fake_row.py <id>
+    FAKE_ROW_LOG=/path/to/log.jsonl python3 fake_row.py <id>
 
 Prints its own argv (excluding the script path) as one ``repr(...)`` line —
 so a test can confirm a row id, however it is spelled, arrived as exactly
@@ -9,6 +10,14 @@ one argv element rather than being parsed or expanded by a shell — then,
 for a known id, the id's canned scenario text; an unknown id exits 2 with
 nothing else on stdout, matching how a real row-lookup command behaves when
 a row does not exist.
+
+When ``FAKE_ROW_LOG`` is set, one JSON line of ``sys.argv`` (the full argv,
+script path included) is appended to that file per invocation — an
+independent, out-of-band record a test can read back after running
+bridge_validate.py end to end, so the cache and argv-safety proofs do not
+depend on parsing this script's own stdout back out of bridge_validate.py's
+JSON (which does not carry it) or on calling adapter.py directly instead of
+going through the real bridge_validate.py -> adapter.py -> fake_row.py path.
 
 R1's text contains, verbatim, both AT-1's and AT-2's `Then` text from
 agreed_bridged.md, so neither drifts. R2's text is deliberately reworded
@@ -18,6 +27,8 @@ something real to catch.
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 
 SCENARIOS = {
@@ -33,7 +44,16 @@ SCENARIOS = {
 }
 
 
+def log_invocation() -> None:
+    log_path = os.environ.get("FAKE_ROW_LOG")
+    if not log_path:
+        return
+    with open(log_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(sys.argv) + "\n")
+
+
 def main(argv=None) -> int:
+    log_invocation()
     args = sys.argv[1:] if argv is None else argv
     print(repr(args))
     if len(args) != 1 or args[0] not in SCENARIOS:

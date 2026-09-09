@@ -37,8 +37,10 @@ map, never §6.
 
 Then run `python3 "${CLAUDE_SKILL_DIR}/scripts/bridge_validate.py" <doc>`. Fix every
 error it reports — a missing `Row`, a bad row id, a missing snapshot line — before
-the steps below. A warning is drift against the map's current text, not a defect
-here: name it in the close-out rather than editing §6, which is now a snapshot.
+the steps below. Two different warnings mean two different things: `THEN_NOT_IN_MAP`
+is drift against the map's current text — name it in the close-out, never edit §6,
+which is now a snapshot; `NO_ROW_ID_PATTERN` or `NO_MAP_ROW_COMMAND` means the
+project's own map config is incomplete — say so, and fix the config, not the doc.
 
 No map → skip this section; there is no bridge step, §6 gains no `Row` column, and
 `bridge_validate.py` does not run.

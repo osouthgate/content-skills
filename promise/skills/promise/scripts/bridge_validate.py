@@ -15,9 +15,11 @@ row — read through `adapter.py`, never a shell string composed from
 configuration plus doc content, so a row id (however it is spelled) always
 travels as exactly one argv element.
 
-A doc still at `draft` or `superseded-by` has not been bridged at all:
-`bridged: false` is reported and no other check runs. A project with no
-`map` configured has nothing to validate against.
+A doc still at `draft` or `superseded-by` has not been bridged at all,
+checked before anything else: `bridged: false` is reported and no other
+check runs, whether or not a map is configured. Only once the doc's own
+status clears that does an unconfigured `map` become the finding — there
+is nothing to validate a bridged doc against.
 
 Exit 0 when there are no error-severity findings; 1 when there are (or, under
 --strict, any warning); 2 on a usage error. Human output is one line per
@@ -173,6 +175,23 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
     status = lint_outcome.get_status(lines)
     six_line = section6_heading_line(lines)
 
+    # NOT_BRIDGED is checked on the doc's own status alone, before the map
+    # check: a doc still at draft/superseded-by has not been bridged
+    # regardless of whether a map is configured, so it must never report
+    # MAP_NOT_CONFIGURED instead — that finding is specifically about a
+    # doc that IS ready to check against a map and has nothing to check
+    # against, not about one that has not reached that point yet.
+    if status in NOT_BRIDGED_STATUSES:
+        findings = [
+            finding(
+                "NOT_BRIDGED",
+                six_line,
+                f"Status: {status} — the bridge has not happened yet",
+                "info",
+            )
+        ]
+        return finalize(doc_path, status, False, map_configured, [], findings, strict)
+
     if not map_configured:
         findings = [
             finding(
@@ -184,35 +203,20 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
         ]
         return finalize(doc_path, status, False, False, [], findings, strict)
 
-    if status in NOT_BRIDGED_STATUSES:
-        findings = [
-            finding(
-                "NOT_BRIDGED",
-                six_line,
-                f"Status: {status} — the bridge has not happened yet",
-                "info",
-            )
-        ]
-        return finalize(doc_path, status, False, True, [], findings, strict)
-
     data = outcome_rows.extract(doc_path)
     line_by_id = {r["id"]: r["line"] for r in lint_outcome.parse_acceptance_rows(lines)}
     row_required = status in BRIDGE_REQUIRED_STATUSES
 
-    row_id_pattern = map_value.get("rowIdPattern")
-    pattern_configured = isinstance(row_id_pattern, str) and bool(row_id_pattern)
-    compiled_pattern = None
-    if pattern_configured:
-        try:
-            compiled_pattern = re.compile(row_id_pattern)
-        except re.error:
-            pattern_configured = False
-
-    row_command = map_value.get("row")
-    row_command_configured = isinstance(row_command, str) and bool(row_command)
-
     findings: List[Dict[str, Any]] = []
-    if not pattern_configured:
+
+    # rowIdPattern has three states, not two: absent (NO_ROW_ID_PATTERN,
+    # warn — ROW_ID_FORMAT is simply not checked), present but invalid
+    # regex syntax (INVALID_ROW_ID_PATTERN, error — a misconfiguration,
+    # never silently treated the same as absent), or present and usable.
+    row_id_pattern = map_value.get("rowIdPattern")
+    pattern_provided = isinstance(row_id_pattern, str) and bool(row_id_pattern)
+    compiled_pattern = None
+    if not pattern_provided:
         findings.append(
             finding(
                 "NO_ROW_ID_PATTERN",
@@ -221,6 +225,23 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
                 "warn",
             )
         )
+    else:
+        try:
+            compiled_pattern = re.compile(row_id_pattern)
+        except re.error as exc:
+            findings.append(
+                finding(
+                    "INVALID_ROW_ID_PATTERN",
+                    six_line,
+                    f"map.rowIdPattern {row_id_pattern!r} does not compile: {exc}; "
+                    "ROW_ID_FORMAT is not checked",
+                    "error",
+                )
+            )
+    pattern_usable = compiled_pattern is not None
+
+    row_command = map_value.get("row")
+    row_command_configured = isinstance(row_command, str) and bool(row_command)
     if not row_command_configured:
         findings.append(
             finding(
@@ -257,7 +278,7 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
 
         mapped += 1
 
-        if pattern_configured and compiled_pattern.fullmatch(row_value) is None:
+        if pattern_usable and compiled_pattern.fullmatch(row_value) is None:
             findings.append(
                 finding(
                     "ROW_ID_FORMAT",

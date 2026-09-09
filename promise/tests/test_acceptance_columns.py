@@ -10,9 +10,13 @@ appear in any position, or not at all. `lint_outcome.parse_acceptance_rows`
 maps every column by its header text (case-insensitive, trimmed) through
 `acceptance_column_map`, and `find_acceptance_tables`/`check_acceptance_table`
 (the ACCEPTANCE_TABLE rule) use the same map to decide whether a table
-qualifies at all — Given, When and Then must each appear by name; Row is
-optional and, absent, every row's `row` reads as None rather than as
-whatever cell happens to sit at the old fixed position.
+qualifies at all — Given, When and Then must each appear by name, each
+exactly once; Row is optional (and, if present, must also appear exactly
+once) and, absent, every row's `row` reads as None rather than as whatever
+cell happens to sit at the old fixed position. A header naming one of
+Given/When/Then/Row more than once never guesses which occurrence is "the"
+column either — it does not qualify at all, the same as a header missing
+one of them.
 
 Fixtures live under fixtures/acceptance-columns/, each conforming.md with
 one change to SS6's table shape (and, for the `_agreed` variant, the status
@@ -31,6 +35,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional, Tuple
 
 TESTS_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = TESTS_DIR / "fixtures" / "acceptance-columns"
@@ -47,13 +52,16 @@ LABEL_NO_ROW = FIXTURES_DIR / "label_column_no_row.md"
 LABEL_NO_ROW_AGREED = FIXTURES_DIR / "label_column_no_row_agreed.md"
 ROW_SECOND = FIXTURES_DIR / "row_second_column.md"
 HEADER_MISSING_THEN = FIXTURES_DIR / "header_missing_then.md"
+DUPLICATE_THEN = FIXTURES_DIR / "duplicate_then_column.md"
+DUPLICATE_ROW = FIXTURES_DIR / "duplicate_row_column.md"
 
 
-def run_json(script: Path, *args: str) -> dict:
+def run_json(script: Path, *args: str) -> Tuple[subprocess.CompletedProcess, Optional[dict]]:
     result = subprocess.run(
         [sys.executable, str(script), *args], capture_output=True, text=True
     )
-    return json.loads(result.stdout)
+    data = json.loads(result.stdout) if result.stdout.strip() else None
+    return result, data
 
 
 def write_config(project_dir: Path, config: dict) -> None:
@@ -68,12 +76,15 @@ def fixture_command(path: Path) -> str:
 
 class FixturesExistTests(unittest.TestCase):
     def test_every_fixture_exists(self) -> None:
-        for path in (LABEL_NO_ROW, LABEL_NO_ROW_AGREED, ROW_SECOND, HEADER_MISSING_THEN):
+        for path in (
+            LABEL_NO_ROW, LABEL_NO_ROW_AGREED, ROW_SECOND, HEADER_MISSING_THEN,
+            DUPLICATE_THEN, DUPLICATE_ROW,
+        ):
             self.assertTrue(path.is_file(), f"missing fixture: {path}")
 
     def test_each_new_fixture_is_conforming_plus_one_table_change(self) -> None:
         conforming_lines = CONFORMING.read_text(encoding="utf-8").splitlines()
-        for path in (LABEL_NO_ROW, ROW_SECOND, HEADER_MISSING_THEN):
+        for path in (LABEL_NO_ROW, ROW_SECOND, HEADER_MISSING_THEN, DUPLICATE_THEN, DUPLICATE_ROW):
             lines = path.read_text(encoding="utf-8").splitlines()
             # Same line count: only the SS6 table's own lines were rewritten
             # (a straight header+row replacement), nothing inserted or removed.
@@ -84,11 +95,13 @@ class LabelColumnNoRowTests(unittest.TestCase):
     """(1) An extra `Label` column, second, and no `Row` column at all."""
 
     def test_lints_clean(self) -> None:
-        data = run_json(LINT, str(LABEL_NO_ROW), "--json")
+        result, data = run_json(LINT, str(LABEL_NO_ROW), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(data["stats"], {"errors": 0, "warnings": 0, "total": 0})
 
     def test_outcome_rows_reads_the_real_given_when_then(self) -> None:
-        data = run_json(ROWS, str(LABEL_NO_ROW), "--json")
+        result, data = run_json(ROWS, str(LABEL_NO_ROW), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         by_id = {r["id"]: r for r in data["rows"]}
         self.assertEqual(len(by_id), 3)
         self.assertEqual(by_id["AT-1"]["given"], "Ana is in a channel")
@@ -102,7 +115,8 @@ class LabelColumnNoRowTests(unittest.TestCase):
             self.assertNotEqual(r["then"], "routine")
 
     def test_outcome_rows_row_is_null_with_no_row_column(self) -> None:
-        data = run_json(ROWS, str(LABEL_NO_ROW), "--json")
+        result, data = run_json(ROWS, str(LABEL_NO_ROW), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for r in data["rows"]:
             self.assertIsNone(r["row"], r)
 
@@ -120,9 +134,10 @@ class LabelColumnNoRowTests(unittest.TestCase):
                     }
                 },
             )
-            data = run_json(
+            result, data = run_json(
                 BRIDGE, str(LABEL_NO_ROW_AGREED), "--cwd", str(project), "--json"
             )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)  # ROW_MISSING x3 is an error
             rules = [f["rule"] for f in data["findings"]]
             self.assertEqual(rules.count("ROW_MISSING"), 3, rules)
             self.assertNotIn("ROW_ID_FORMAT", rules, rules)
@@ -135,11 +150,13 @@ class RowSecondColumnTests(unittest.TestCase):
     """(2) `Row` as the SECOND column."""
 
     def test_lints_clean(self) -> None:
-        data = run_json(LINT, str(ROW_SECOND), "--json")
+        result, data = run_json(LINT, str(ROW_SECOND), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(data["stats"], {"errors": 0, "warnings": 0, "total": 0})
 
     def test_outcome_rows_reads_row_from_its_named_position(self) -> None:
-        data = run_json(ROWS, str(ROW_SECOND), "--json")
+        result, data = run_json(ROWS, str(ROW_SECOND), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         by_id = {r["id"]: r for r in data["rows"]}
         self.assertEqual(by_id["AT-1"]["row"], "R1")
         self.assertEqual(by_id["AT-2"]["row"], "R1")
@@ -154,7 +171,8 @@ class HeaderMissingThenTests(unittest.TestCase):
     """(3) A header that lacks `Then` (an unrelated `Notes` column instead)."""
 
     def test_acceptance_table_fires_alone(self) -> None:
-        data = run_json(LINT, str(HEADER_MISSING_THEN), "--json")
+        result, data = run_json(LINT, str(HEADER_MISSING_THEN), "--json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
         self.assertEqual(error_rules, ["ACCEPTANCE_TABLE"])
         finding = next(f for f in data["findings"] if f["rule"] == "ACCEPTANCE_TABLE")
@@ -164,7 +182,37 @@ class HeaderMissingThenTests(unittest.TestCase):
         # The header not qualifying by name must not also erase every row
         # for SCENARIOS_COUNT/TAGS_RESOLVE — only ACCEPTANCE_TABLE above
         # fired, which it could not have if those two had also tripped.
-        data = run_json(ROWS, str(HEADER_MISSING_THEN), "--json")
+        result, data = run_json(ROWS, str(HEADER_MISSING_THEN), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(data["rows"]), 3)
+
+
+class DuplicateColumnNameTests(unittest.TestCase):
+    """A header naming `Given`/`When`/`Then`/`Row` more than once is rejected
+    outright — never a guessed mapping — the same as a header missing one of
+    them. SCENARIOS_COUNT/TAGS_RESOLVE still see every row, via the same
+    positional fallback a missing-name header already relies on."""
+
+    def test_duplicate_then_fires_acceptance_table_alone(self) -> None:
+        result, data = run_json(LINT, str(DUPLICATE_THEN), "--json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
+        self.assertEqual(error_rules, ["ACCEPTANCE_TABLE"])
+
+    def test_duplicate_then_row_count_still_counted(self) -> None:
+        result, data = run_json(ROWS, str(DUPLICATE_THEN), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(data["rows"]), 3)
+
+    def test_duplicate_row_column_fires_acceptance_table_alone(self) -> None:
+        result, data = run_json(LINT, str(DUPLICATE_ROW), "--json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
+        self.assertEqual(error_rules, ["ACCEPTANCE_TABLE"])
+
+    def test_duplicate_row_column_row_count_still_counted(self) -> None:
+        result, data = run_json(ROWS, str(DUPLICATE_ROW), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(data["rows"]), 3)
 
 
@@ -173,11 +221,13 @@ class RegressionGuardTests(unittest.TestCase):
     the bridge fixtures must behave exactly as they did before this fix."""
 
     def test_conforming_still_lints_clean(self) -> None:
-        data = run_json(LINT, str(CONFORMING), "--json")
+        result, data = run_json(LINT, str(CONFORMING), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(data["stats"], {"errors": 0, "warnings": 0, "total": 0})
 
     def test_conforming_rows_unchanged(self) -> None:
-        data = run_json(ROWS, str(CONFORMING), "--json")
+        result, data = run_json(ROWS, str(CONFORMING), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         by_id = {r["id"]: r for r in data["rows"]}
         self.assertEqual(by_id["AT-1"]["given"], "Ana is in a channel")
         self.assertEqual(by_id["AT-1"]["then"], "she gets no push or badge from it")
@@ -194,7 +244,8 @@ class RegressionGuardTests(unittest.TestCase):
         # The template's own SS6 header is `# | Given | When | Then | Row`
         # (architecture.md's canonical shape) -- confirms the Row-by-name
         # path still recognises the template's own column, empty as it is.
-        data = run_json(ROWS, str(TEMPLATE), "--json")
+        result, data = run_json(ROWS, str(TEMPLATE), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertGreaterEqual(len(data["rows"]), 1)
         for r in data["rows"]:
             self.assertIsNone(r["row"])
@@ -210,7 +261,8 @@ class RegressionGuardTests(unittest.TestCase):
         }
         for filename, rule in expected.items():
             with self.subTest(fixture=filename):
-                data = run_json(LINT, str(hardening_dir / filename), "--json")
+                result, data = run_json(LINT, str(hardening_dir / filename), "--json")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)  # ACCEPTANCE_TABLE is always error
                 error_rules = sorted({f["rule"] for f in data["findings"] if f["severity"] == "error"})
                 self.assertEqual(error_rules, [rule], f"{filename}: got {error_rules}")
 
@@ -220,7 +272,8 @@ class RegressionGuardTests(unittest.TestCase):
         # narrow smoke check that outcome_rows.py's extraction of its
         # standard `# | Given | When | Then | Row` header is unaffected.
         bridge_fixture = TESTS_DIR / "fixtures" / "bridge" / "agreed_bridged.md"
-        data = run_json(ROWS, str(bridge_fixture), "--json")
+        result, data = run_json(ROWS, str(bridge_fixture), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         by_id = {r["id"]: r for r in data["rows"]}
         self.assertEqual(by_id["AT-1"]["row"], "R1")
         self.assertEqual(by_id["AT-3"]["row"], "R2")

@@ -289,6 +289,7 @@ parseable value. A directory lints every `*.md` containing `## 0. TLDR`.
 | `SCENARIOS_COUNT` | The `**Scenarios:**` line's acceptance-row count equals the number of §6 rows. The worked-example count is checked only if §3 examples are parseable (`### ` or bold-led blocks); otherwise `warn` that it was not checked. | error / warn |
 | `WHY_LINE` | §4, §5, §6, §7 each contain a line beginning `Why — what breaks without it:`. | error |
 | `UNTESTED_ON_AGREED` | A rule tagged `UNTESTED` while `Status:` is `agreed`, `building` or `shipped`. | error |
+| `BUILDING_NEEDS_GATE` | `Status:` is `building` and no header line (any line before `## 0.`) matches `Red gate: <sha> <YYYY-MM-DD>` exactly — sha 7–40 hex characters (digits alone qualify), date `YYYY-MM-DD`; position among the header lines is not enforced, the line's own shape is. A hex-looking run inside another header value (`Supersedes: deadbeef`, a digit-only `Last decision:`) does not satisfy it. | error |
 | `PLACEHOLDER` | `TBD`, `TODO`, `<fill`, `decide later` inside §0; any `<…>` placeholder in §0, in the `Owner:` / `Last decision:` values, or in a §6 data cell; a literal `YYYY-MM-DD`. `--template` exempts the angle-bracket and date placeholders so the bundled template can be linted; every other rule stays active. A copied, unfilled template therefore fails a normal lint. | error |
 | `UNREADABLE` | The path cannot be read or is not valid UTF-8 — one finding for the file, never a traceback. | error |
 | `AGENT_NOTES_MANY` | More than 8 numbered agent notes under §0. | warn |
@@ -327,14 +328,19 @@ Checks a bridged doc's §6 against the project's map. Config is resolved exactly
 plus doc content, so a row id — however it is spelled — always travels as one argv
 element.
 
+Checked in this order — NOT_BRIDGED before MAP_NOT_CONFIGURED, because a doc
+still at `draft`/`superseded-by` has not been bridged regardless of whether a
+map exists to bridge it to:
+
 | Rule id | Checks | Severity |
 |---|---|---|
 | `UNREADABLE` | DOC is missing or not valid UTF-8. | error |
-| `MAP_NOT_CONFIGURED` | No `map` in the config, or no config at all — nothing to validate against. | error |
 | `NOT_BRIDGED` | `Status:` is `draft` or `superseded-by` — the bridge has not happened. Reports `bridged: false`; no other rule runs. | info |
+| `MAP_NOT_CONFIGURED` | No `map` in the config, or no config at all — nothing to validate against. | error |
 | `ROW_MISSING` | An AT row's `Row` cell is empty while `Status:` is `agreed`, `building` or `shipped`. | error |
 | `ROW_ID_FORMAT` | A `Row` value does not match `map.rowIdPattern`. | error |
 | `NO_ROW_ID_PATTERN` | `map.rowIdPattern` is not configured; `ROW_ID_FORMAT` is skipped. | warn |
+| `INVALID_ROW_ID_PATTERN` | `map.rowIdPattern` is configured but does not compile as a regex — the exception text is carried in the message; `ROW_ID_FORMAT` is skipped, same as absence, but this is a misconfiguration, never silently treated as "no pattern". | error |
 | `ROW_NOT_FOUND` | `map.row` is configured and `adapter.py row <id>` reports a non-zero exit or empty stdout. | error |
 | `NO_MAP_ROW_COMMAND` | `map.row` is not configured; the drift check against the map is skipped. | warn |
 | `SNAPSHOT_LINE_MISSING` | §6 has no line starting `Snapshot taken at` (a leading backtick or asterisk tolerated). | error |
