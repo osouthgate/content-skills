@@ -53,7 +53,7 @@ run that command by hand as the first action.
 
 ## Phase 0 — orient
 
-!`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" --mode "$0" --input "$ARGUMENTS"`
+!`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py"`
 
 If the block above is empty or shows an error, run that exact command by
 hand before anything else — every mode below depends on its JSON. If
@@ -64,11 +64,13 @@ script performs is also written as a rule in the mode files and the
 framework, so it can be applied by hand for this run. Never substitute a
 second implementation of a script.
 
-The JSON's `mode` field echoes the word above only when it is one of the
-eight mode names; otherwise it comes back `infer`. `suggestedMode` and
-`signals[]` are the script's deterministic reading of the full input (a
-mode word, an existing doc's title, a PR number, a list of complaints…).
-Treat them as a hint: the Modes section below decides, and says so.
+The block above deliberately carries no part of the user's message: a message
+with a quote in it would break a shell line, and user text is never composed
+into a command. For the deterministic mode hint, write the message to a
+scratch file with the Write tool, then run
+`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" --input-file <that file>`
+and read `suggestedMode`, `signals[]` and `ambiguous`. Treat them as a hint:
+the Modes section below decides, and says so.
 
 State, in one line, what Phase 0 resolved: mode (and that it was inferred,
 if it was), framework source, docs home and its source, whether a map is

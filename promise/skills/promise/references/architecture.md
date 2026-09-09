@@ -107,10 +107,12 @@ names in its header. It never loads all eight.
 
 ## 5. Phase 0 — orient (every mode, every run)
 
-SKILL.md runs, at load time or as its first action:
+SKILL.md runs, at load time or as its first action — with no part of the user's message on
+the command line, because a quote in the message would break the shell line and user text is
+never composed into a command:
 
 ```
-python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" [--mode <mode>] [--cwd <path>]
+python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" [--mode <mode>] [--cwd <path>] [--input-file <path|->]
 ```
 
 `orient.py` never fails hard on a valid invocation. It prints one JSON object to stdout and
@@ -160,7 +162,8 @@ Detection rules when config is absent:
 - **adopted**: true when a config was loaded AND `claudeMd.hasPromiseSection` is true. When
   false, `warnings[]` carries `project not adopted — run /promise adopt`, and the router
   offers `adopt` once per session (Recommended) before continuing with the requested mode.
-- **suggestedMode / signals**: `--input "<the user's whole argument string>"` makes the
+- **suggestedMode / signals**: `--input-file <path>` (or `-` for stdin; `--input "<text>"`
+  exists for tests and programmatic callers) makes the
   script read the input against the §4 table deterministically — a leading mode word, an
   `existingDocs` title or path plus a critique or change verb, two doc matches, a PR or
   commit or test-file pattern, a `map.rowIdPattern` match, a list of complaints, an

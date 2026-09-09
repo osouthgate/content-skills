@@ -883,7 +883,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             "architecture.md SS4)"
         ),
     )
+    parser.add_argument(
+        "--input-file",
+        default=None,
+        help="read the user's message from this file ('-' for stdin) instead of --input; "
+             "use it whenever the message may contain quotes, so it never passes through a shell",
+    )
     args = parser.parse_args(argv)
+    if getattr(args, "input_file", None):
+        try:
+            if args.input_file == "-":
+                args.input = sys.stdin.read()
+            else:
+                with open(args.input_file, "r", encoding="utf-8-sig") as fh:
+                    args.input = fh.read()
+        except OSError as exc:
+            print(f"orient.py: cannot read --input-file: {exc}", file=sys.stderr)
+            return 2
 
     try:
         result = build_orientation(args.mode, args.cwd, args.input)

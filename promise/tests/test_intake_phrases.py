@@ -36,5 +36,34 @@ class IntakePhrases(unittest.TestCase):
                 self.assertEqual(data["suggestedMode"], "intake", f"{phrase!r} -> {data['suggestedMode']} {data['signals']}")
 
 
+class InputFile(unittest.TestCase):
+    """A message with quotes and apostrophes never passes through a shell: it is read from a
+    file or stdin, and the mode hint still comes out right."""
+
+    MESSAGE = 'feedback: "context and citations should be added to the task properties"; it doesn\'t read inline'
+
+    def test_input_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "msg.txt"
+            path.write_text(self.MESSAGE, encoding="utf-8")
+            proc = subprocess.run([sys.executable, str(ORIENT), "--cwd", tmp, "--input-file", str(path)],
+                                  capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["suggestedMode"], "intake", data["signals"])
+
+    def test_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run([sys.executable, str(ORIENT), "--cwd", tmp, "--input-file", "-"],
+                                  input=self.MESSAGE, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["suggestedMode"], "intake")
+
+    def test_missing_file_exits_2(self) -> None:
+        proc = subprocess.run([sys.executable, str(ORIENT), "--input-file", "/nonexistent/msg.txt"],
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
