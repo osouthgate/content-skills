@@ -5,8 +5,10 @@ planning, not the record of it. The human's decisions go in verbatim and first; 
 agent's job is to find contradictions in them, propose the mechanism, and build.
 
 Pairs with the `/promise` skill (SKILL.md beside this file), which produces and evolves
-docs in this shape. This file is the single source of truth for the template, contract,
-and lifecycle — the skill defers to it wherever they disagree.
+docs in this shape. This file is the single source of truth for the contract, section
+rules, lifecycle and review rubric — the skill defers to it wherever they disagree. The
+template itself is `templates/outcome-doc.md`, rendered by `scripts/render_outcome.py`
+and linted by `scripts/lint_outcome.py --template templates/outcome-doc.md`.
 
 ---
 
@@ -50,22 +52,32 @@ and build.**
      confirmation changes it.
    - **Agent half** — Invariants, remaining worked examples, Mechanism, Acceptance,
      Build phases. The agent drafts these *from* the human half; the human strikes
-     and corrects.
+     and corrects. Acceptance is agent-drafted only until the capability-map bridge:
+     once bridged, §6 is a read-only snapshot (F7; § Lifecycle) and the map is where
+     the scenarios change.
 2. **One doc per capability.** A sibling doc covering overlapping surface is a bug:
    merge and delete, don't cross-reference. On supersede, **delete** the superseded
-   doc — "if we can't easily find it, we probably don't have it" cuts both ways.
-3. **The 60-second standard, with numbers.** §0 alone — ≤ 40 lines, one screen — must
-   let a reader disagree with something specific in 60 seconds. The whole human half
-   (§0–§2 plus the seed example) is ≤ 150 lines. If a reader needs more than §0 to
-   object, the doc failed, whatever else it contains. (§5 Mechanism is deliberately
-   uncapped — see the length-budget rule.)
-4. **Every agent-half section carries one line: "Why — what breaks without it."**
-   If that line can't be written, cut the section. (The founder-doc test.)
+   doc — "if we can't easily find it, we probably don't have it" cuts both ways. A
+   file the human keeps anyway carries `superseded-by <doc>` (§ Lifecycle).
+3. **The 60-second standard, with numbers.** §0 alone — ≤ 40 lines counted from the
+   §0 heading to the line above the agent notes, one screen — must let a reader
+   disagree with something specific in 60 seconds; the lint fails a §0 past 40 lines
+   (`TLDR_BUDGET`). The whole human half (§0–§2 plus the seed example)
+   is ≤ 150 lines; the lint warns past that (`HUMAN_HALF_BUDGET`) rather than failing,
+   because the seed example's length is the human's call. If a reader needs more than
+   §0 to object, the doc failed, whatever else it contains. (§5 Mechanism is
+   deliberately uncapped — see the length-budget rule.)
+4. **Every agent-drafted section §4–§7 carries one line: "Why — what breaks without
+   it."** If that line can't be written, cut the section. (The founder-doc test.) The
+   lint checks §4–§7 (`WHY_LINE`); the examples the agent adds to §3 extend a human
+   section and carry no Why line.
 5. **Worked examples before prose.** Every rule ships with at least one scenario in
    ABC form — named actors, concrete state, expected outcome. A rule that can't be
-   expressed as a scenario isn't a rule yet.
+   expressed as a scenario isn't a rule yet. A §0 carries at least one rule;
+   `lint_outcome.py` reports an empty `**Rules:**` block (`RULES_PRESENT`).
 6. **Acceptance criteria are scenarios, not adjectives.** Given / When / Then, one row
-   per scenario, each row mappable to a runnable test.
+   per scenario, each row naming the altitude its `Then` asserts on and mappable to a
+   runnable test.
 7. **Outcomes are decided, not generated.** The outcome line and the "how we'll know"
    line in §0 are human decisions. The agent may propose a **slate of verbatim
    candidates** — each citing the source line it derives from, what it commits you to,
@@ -80,117 +92,15 @@ and build.**
 
 ## The template
 
-```markdown
-# <Capability>
-
-Status: draft | agreed | building | shipped | superseded-by <doc>
-Owner: <name>        Last decision: YYYY-MM-DD
-Supersedes: <docs deleted when this doc was agreed — or "—">
-
-Contents: [0. TLDR](#0-tldr) · [1. Problem](#1-problem) · [2. Outcome](#2-outcome) ·
-[3. Worked examples](#3-worked-examples) · [4. Invariants](#4-invariants) ·
-[5. Mechanism](#5-mechanism) · [6. Acceptance](#6-acceptance) ·
-[7. Build phases](#7-build-phases) · [8. Decisions](#8-decisions) ·
-[9. Open questions](#9-open-questions) · [10. Out of scope](#10-out-of-scope)
-
-## 0. TLDR
-*(author: <name>, <date> — protected: do not rewrite, expand, or paraphrase — human)*
-
-**Outcome:** <one line — what is true after this ships, in the owner's words>
-**Rules:**
-- One-line rules, verbatim. This is their ONE home — there is no other rules section.  → AT-1, AT-4
-- Schema constraints count as rules; when code intent and schema disagree, schema wins.  → UNTESTED
-**How we'll know:** the demoable or measurable signal. Decided here, by a human.
-**Scenarios:** <N> acceptance rows (§6), <M> worked examples (§3).
-
-Exactly two things inside this block are agent-maintained metadata, and an
-agent may edit ONLY these two: the trailing `→ AT-n` / `→ UNTESTED` tag on
-each rule (never the rule text), and the `Scenarios:` counts. Both are
-derived from §3/§6 and must be re-derived on every revision — a stale count
-in the doc's front door is a small lie in the most-read place. Everything
-else — outcome line, rule text, how-we'll-know — is frozen and changes only
-by human confirmation.
-
-Agent notes (appended, numbered — never edited into the block above; they
-sit under §0 but do NOT count toward its 40-line budget):
-1. <contradiction / gap / question about a rule>
-
-## 1. Problem
-*(human)*
-
-What breaks today, in current-state terms — the behaviour, not the feature idea.
-Evidence: a bug report, a quote, or a file:line.
-
-## 2. Outcome
-*(human)*
-
-**After this ships, it is true that:** 2–5 observable statements expanding §0's
-outcome line.
-**Why we need it:** what it unlocks; what breaks or stays broken without it.
-(The how-we'll-know line lives in §0 — one home, no copy here.)
-
-## 3. Worked examples
-*(human seeds ≥1, agent extends)*
-
-Named actors, concrete state, expected outcome. Cover at minimum:
-the happy path, the disconnect/undo path, the permission-removal path.
-
-    Ana connects, full-syncs A, B, C.
-    Ben connects. Prior sync exists → ACL probe returns B, C, D.
-    Expected: no full sync. B, C = edge write only. Zero content fetches. D full-syncs.
-
-## 4. Invariants
-*(agent derives, human confirms)*
-
-"X must never Y" one-liners. Each carries its enforcement point
-(constraint / test / file:line) or the flag UNENFORCED — and, where the guarantee
-has an edge, a one-line **boundary**: the condition beyond which it does not hold
-("cannot prevent X across two scopes; that is user error, not a violation").
-An invariant without a boundary claim overpromises.
-Why — what breaks without it: <one line>
-
-## 5. Mechanism
-*(agent)*
-
-The design: what exists today (with file:line evidence), what changes, reuse-first.
-Each subsection ends with `Why: <one line>`.
-Why — what breaks without it: <one line>
-
-## 6. Acceptance
-*(agent drafts, human confirms)*
-
-| #    | Given | When | Then | Row |
-|------|-------|------|------|-----|
-| AT-1 | ...   | ...  | ...  |     |
-Rows carry stable IDs (AT-1, AT-2, …) so §0 rules can cite them; renumbering
-breaks the §0 tags, so IDs are append-only. Each row maps to a runnable test or
-eval command. The `Row` column is optional and empty until a capability map's
-`agreed` bridge (Lifecycle) files this scenario into it — then it holds that
-row's id. For capabilities about access, permissions, or visibility, phrase
-rows as user questions:
-Given <role> | When they ask "<question>" | Then answered / refused / partially answered.
-Why — what breaks without it: <one line>
-
-## 7. Build phases
-*(agent)*
-
-Small, ordered, verifiable. Each phase names the acceptance rows it turns green.
-Why — what breaks without it: <one line>
-
-## 8. Decisions
-| # | Date | Decision | Owner | Why |
-Decisions may be **partially ruled**: record the ruling made, by whom, and the
-narrowed residual question ("mechanism agreed by both reviewers; remaining product
-question: …"). Narrowing is progress — a register that only knows OPEN/answered
-loses it.
-
-## 9. Open questions
-Qn — owner: <name> — BLOCKING | non-blocking
-Answers appended inline with a date, never deleted.
-
-## 10. Out of scope
-Explicit. Link the one doc that owns each excluded surface.
-```
+The skeleton lives in `templates/outcome-doc.md` — one file, rendered by
+`scripts/render_outcome.py`, kept green by
+`scripts/lint_outcome.py --template templates/outcome-doc.md`.
+It is not duplicated here: two copies would drift, which is the failure this
+framework exists to prevent. What each section must contain is in
+§ Section rules, below. The header lines are `Status:` (one of `draft`, `agreed`,
+`building`, `shipped`, `superseded-by <doc>`), `Owner:` with `Last decision:`,
+`Supersedes:` (the docs merged into this one, or `—`), and — once `building` —
+`Red gate: <sha> <YYYY-MM-DD>` directly under `Supersedes:` (§ Lifecycle).
 
 ---
 
@@ -213,8 +123,9 @@ Explicit. Link the one doc that owns each excluded surface.
   invariants) and the `Scenarios:` counts — both agent-maintained metadata, re-derived
   from §3/§6 on every revision, the tag never the rule text and the count never the
   lines it counts. A rule tagged UNTESTED on a doc moving to `agreed` is a finding.
-  **The 40-line budget covers the block itself** — outcome line, rules, how-we'll-know,
-  scenario counts. Numbered agent notes sit below it and are exempt, but they are not a
+  **The 40-line budget covers the block itself** — the heading and author line, outcome
+  line, rules, how-we'll-know, scenario counts, up to the line above the agent notes.
+  Numbered agent notes sit below it and are exempt, but they are not a
   loophole: past ~8 notes the front door has become a discussion thread, so consolidate
   them, or promote the substantive ones to §9 open questions with owners. Notes are
   where the agent argues; §0 is where the human decided.
@@ -228,18 +139,25 @@ Explicit. Link the one doc that owns each excluded surface.
   re-read every OPEN decision (§8/§9) against it: an option under which the signal
   cannot be staged has been ruled OUT by the signal itself. Record the narrowing in
   the §8 table stating the implication, and leave ratification with the human — this
-  is the existing partially-ruled convention applied in the other direction
+  is the partially-ruled convention (§8, below) applied in the other direction
   (signal → mechanism, not mechanism → signal). Worked example: a chosen signal of
   *"two accounts in the same workspace ask the same question and get different
   answers"* is unstageable under a data model that maps a CRM's shared records to
   workspace scope — so it selected owner-level scoping and narrowed a BLOCKING
   question without anyone arguing the mechanism.
-- **§3 Worked examples** are the reading surface. If a reviewer only reads §0, §2, §3,
-  they should be able to catch a wrong design.
+- **§3 Worked examples** are the reading surface: named actors, concrete state,
+  expected outcome. The human seeds at least one; the agent extends. Cover at minimum
+  the happy path, the undo/reverse path, and any permission or visibility edge the
+  capability has. If a reviewer only reads §0, §2, §3, they should be able to catch a
+  wrong design.
 - **§4 Invariants** is where an invariants-analysis pass plugs in (a dedicated skill if
   you have one, manual otherwise): standing invariants of the touched area + new ones
-  this work introduces, each with enforcement point or UNENFORCED. Four useful moves:
-  the uniqueness claim, two-concepts-one-knob, fail-open-or-closed, schema-wins.
+  this work introduces, each as an "X must never Y" one-liner with its enforcement
+  point (constraint / test / file:line) or UNENFORCED, and, where the guarantee has an
+  edge, a one-line **boundary** — the condition beyond which it does not hold ("cannot
+  prevent X across two scopes; that is user error, not a violation"). An invariant
+  without a boundary claim overpromises. Four useful moves: the uniqueness claim,
+  two-concepts-one-knob, fail-open-or-closed, schema-wins.
 - **§5 Mechanism** carries file:line evidence for every current-state claim,
   reuse-first, and "existing primitive considered / why insufficient" for anything
   new — without mandatory tables and diagrams. Add a diagram only when it replaces
@@ -255,14 +173,30 @@ Explicit. Link the one doc that owns each excluded surface.
     they lose, not just their name.
 - **§6 Acceptance** is the red-test gate: when the doc moves to `building`, the
   acceptance rows become failing tests committed RED first. Rows carry stable,
-  append-only IDs (AT-n) — they are what §0's test tags cite. For capabilities about
-  access, permissions, or visibility, rows are phrased as user questions —
-  `Given <role> | When they ask "<question>" | Then answered / refused / partially
-  answered` — because that is the form the capability will actually be exercised in,
-  and the form a non-engineer can propose test cases in without reading code. The
-  optional `Row` column stays empty until the capability-map bridge (Lifecycle, below)
-  files the row; from then on it cites the map's row id, and the map — not this
-  column — is what changes.
+  append-only IDs (AT-n) — they are what §0's test tags cite. Every row starts and
+  ends with a pipe; a row missing one is still read, GFM-style, and the lint reports
+  it at its own line (`ACCEPTANCE_TABLE`). Each row names its
+  altitude in the `Altitude` column — `data`, `response`, `perception`, `judgement`
+  or `sibling` (references/altitude.md): what its `Then` asserts on, and therefore
+  the only kind of test that can prove it; `reconcile` compares evidence against it.
+  The lint rejects a value outside those five (`ACCEPTANCE_ALTITUDE`) and warns when
+  a table has no `Altitude` column (`ALTITUDE_MISSING`); a row whose `Then` wording
+  and altitude disagree (an "I see…" `Then` marked `data`) is a review finding. For
+  capabilities about access, permissions, or visibility, rows are phrased as user
+  questions — `Given <role> | When they ask "<question>" | Then answered / refused /
+  partially answered` — because that is the form the capability will actually be
+  exercised in, and the form a non-engineer can propose test cases in without reading
+  code. The `Row` column — in the template from the start; a table written without
+  it gains it at the bridge — stays empty until the capability-map bridge (F7;
+  § Lifecycle) files the row; from then on it cites the map's row id, and the map —
+  not this column — is what changes.
+- **§7 Build phases** are small, ordered and verifiable; each names the acceptance
+  rows it turns green. **§8 Decisions** is a table (`# | Date | Decision | Owner |
+  Why`); a decision may be **partially ruled** — record the ruling made, by whom, and
+  the narrowed residual question. Narrowing is progress; a register that only knows
+  OPEN/answered loses it. **§9 Open questions** each carry an owner and `BLOCKING |
+  non-blocking`; answers are appended inline with a date, never deleted. **§10 Out of
+  scope** is explicit and links the one doc that owns each excluded surface.
 - **Length budget — it binds the review surface, not the whole doc.** §0 ≤ 40 lines.
   The human half (§0–§2 + seed example) ≤ 150 lines. §1–§3 one screen each. The review
   surface (§0–§4, §8, §9) must together stay readable in one sitting. §5 Mechanism may
@@ -278,29 +212,44 @@ Explicit. Link the one doc that owns each excluded surface.
 
 ```
 draft ──(human half complete + agent notes resolved)──► agreed
-agreed ──(acceptance rows committed RED)──► building
+agreed ──(acceptance rows committed RED; the sha recorded as a header line)──► building
 building ──(rows green + shipped)──► shipped
-any ──► superseded-by <doc>   (and the superseded doc is DELETED)
+any ──(merge, with the human's yes)──► deleted   (the survivor's `Supersedes:` line is the record)
+any ──► superseded-by <doc>   (only when the human keeps the file instead of deleting it)
 ```
 
-- **Where the project keeps a capability map, `agreed` is also the bridge**
-  (architecture § The bridge). A human groups the confirmed §6 rows into the map's
-  rows by the §0 rule each row is tagged from — one row per story, 1–5 scenarios;
-  more is a chain with a parent — and from then on the map is the source of the
-  scenarios. §6 stays as a snapshot taken at `agreed`, marked as such under the
-  table, and is not edited again. §6 gains a `Row` column
-  citing the map's row id; §0's tags keep citing the doc-local `AT-n` aliases, which
-  stay stable and append-only rather than being replaced by the map's own ids.
+- **Where the project keeps a capability map, `agreed` is the doc's entry to the
+  bridge; `arm` performs the bridge as its first step on `feat/<slug>`.** Between the
+  human's edit and `arm`, `bridge_validate.py` reports `ROW_MISSING` /
+  `SNAPSHOT_LINE_MISSING`: that means not yet armed, never drift. F7 (§ Design
+  decisions of the framework itself) is the one statement of what the bridge is and
+  why; architecture § The bridge carries the procedure. The bridge
+  leaves two traces the tooling checks: each §6 row's `Row` cell holds the map's row
+  id, and one line sits directly under the §6 table —
+  `` Snapshot taken at `agreed` on <YYYY-MM-DD>; the map is the source of these scenarios from here on. ``
+  — after which §6 is not edited again. `bridge_validate.py` requires that line
+  (`SNAPSHOT_LINE_MISSING`) and a filled `Row` cell (`ROW_MISSING`) whenever the
+  status is `agreed` or later and a map is configured (orient's `mapUsable`).
   `shipped` requires every bridged row **proven** at the altitude its own `Then`
   claims: a row proven at a lower altitude than its `Then` asserts is not shipped,
   whatever the map says elsewhere. No map configured ⇒ none of this applies, and §6
   stays the only home.
+- **`building` records the act that earned it.** The red-gate commit's sha and date
+  sit in the header as their own line, `Red gate: <sha> <YYYY-MM-DD>`, directly under
+  `Supersedes:`. `arm` writes it when it writes the status; `lint_outcome.py` rejects
+  a `building` doc without it (`BUILDING_NEEDS_GATE`).
 - **One docs folder is the one home** (e.g. `docs/designs/`). Outcome docs live there.
   Legacy plan folders receive **no new docs** — the build phases live inside the
   outcome doc (§7). Existing plans migrate into their capability's outcome doc as
   they are touched, then get deleted.
 - Status lives in the doc header, not the folder. Folder=status is retired.
 - A doc in `draft` with unresolved BLOCKING questions cannot move to `agreed`.
+- **A superseded doc is deleted, not kept.** Merge folds it into the survivor, names
+  it on the survivor's `Supersedes:` line and in a §8 row, and deletes the file with
+  the human's yes. `superseded-by <doc>` is the status merge writes only when the
+  human chooses to keep the file: a pointer to the survivor, never a second home. The
+  lint requires the target (`HEADER_STATUS`) and `bridge_validate.py` treats such a
+  doc as not bridged.
 - `shipped` docs keep §0 (TLDR — outcome, rules, how-we'll-know), §2 (outcome detail),
   §4 (invariants) as the living record; §7 (build phases) may be pruned.
 
@@ -326,10 +275,11 @@ pack), the framework doubles as the review standard. A conforming review checks:
    with no stated home (appendix, companion doc, archive)? Compression must name where
    the content went.
 5. **Framework shape** — §0 TLDR present and ≤ 40 lines, worked examples present,
-   Given/When/Then acceptance present, every §0 rule carries acceptance-row IDs or
-   **UNTESTED** (an UNTESTED rule on an `agreed`+ doc is a finding), invariants carry
-   enforcement points or UNENFORCED, decisions have owners + blocking flags,
-   disposition names what gets deleted, evidence paths resolvable by any reader.
+   Given/When/Then acceptance present with an altitude on every row, every §0 rule
+   carries acceptance-row IDs or **UNTESTED** (an UNTESTED rule on an `agreed`+ doc is
+   a finding), invariants carry enforcement points or UNENFORCED, decisions have
+   owners + blocking flags, disposition names what gets deleted, evidence paths
+   resolvable by any reader.
 6. **Depth, not just shape** — invariants *argued* (mechanism + boundary), not listed;
    evidence pinned to a commit; design-vs-description flagged wherever behavior doesn't
    exist yet; alternatives rejected with receipts. A doc can have every section present
@@ -362,4 +312,4 @@ The framework eats its own dog food — a compact register of its load-bearing c
 | F4 | How-we'll-know is a forced choice from a verbatim candidate slate; placeholders banned (no pick ⇒ doc stays `draft` with a BLOCKING question); the chosen signal is re-read against every OPEN decision | A blank in a file is indistinguishable from a decision at review time; and a signal can silently select a mechanism — narrowings must be recorded, not discovered |
 | F5 | The outcome line is a forced choice on the same pattern as F4 — open question first, then a verbatim candidate slate (selected-because / commits-you-to / think-about), "none of these" never last, edits enter not candidates. Rules stay exempt: verbatim-confirm-only, never slated | F4 fixed the placeholder failure for one of §0's three fields and left the other two as blanks — the same argument applies to the outcome line; rules are excluded because a slate is itself a paraphrase offered as a menu, and picking from a menu of paraphrases ratifies whichever paraphrase reads closest, not the source — reintroducing the paraphrase loop at the exact spot the framework protects |
 | F6 | Revise mode gets an explicit procedure: only agent-maintained metadata (the `→ AT-n`/`→ UNTESTED` tag, the `Scenarios:` counts) changes inside §0 without asking; a rule's text, the outcome line, and how-we'll-know all require the human, every time. Agent notes sit below §0, exempt from its 40-line budget, but consolidate or promote past ~8 | Without a stated procedure, revise is the mode where §0 is most at risk — the doc already exists, so there's no interview protecting it; and an unbounded notes list quietly turns the front door into a discussion thread nobody reads in 60 seconds |
-| F7 | Where a project keeps a capability map, `agreed` bridges §6's rows into it; from then on the map is the source of the scenarios, not a second copy. §6 gains an optional `Row` column citing the map's row id; §0 keeps citing the doc-local `AT-n` aliases | One promise, one home — a copy made at `agreed` would drift the day after, the same failure the framework exists to prevent, just moved one level up |
+| F7 | Where a project keeps a capability map, `agreed` is the doc's entry to the bridge and `arm` performs it as its first step on `feat/<slug>`: a human groups the confirmed §6 rows into the map's rows by the §0 rule each is tagged from — one row per story, 1–5 scenarios, more is a chain with a parent, rows no rule cites are one group the human places — and from then on the map is the source of the scenarios. §6 is a read-only snapshot, marked by the snapshot line under its table (§ Lifecycle), and its `Row` column cites the map's row id; §0 keeps citing the doc-local `AT-n` aliases, which stay stable and append-only rather than being replaced by the map's ids. `shipped` needs every bridged row proven at the altitude its own `Then` claims. No map ⇒ §6 stays the only home | One promise, one home — a copy made at `agreed` would drift the day after, the same failure the framework exists to prevent, just moved one level up |

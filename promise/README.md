@@ -1,15 +1,86 @@
 # promise
 
-> One doc per capability, the human's decisions verbatim and first — and then the
-> promise is carried into the project's capability map, its red tests, and its proof.
+A Claude Code skill that makes the human's decisions the read-only input to a plan,
+commits the plan's acceptance rows as failing tests before anything is built, and
+updates the plan when the work lands. The model may argue with your decisions in
+numbered notes underneath them; it may not rewrite them.
 
-An outcome doc *makes* a promise. A proven row in a capability map *keeps* it. A defect
-*breaks* it. Most planning skills stop at the doc; most test maps start after the build.
-The two never meet, so the doc's acceptance rows and the map's scenarios become two
-copies of one promise, and copies drift.
+This is the part of a doc a founder reads in sixty seconds and can disagree with:
 
-`promise` is one skill over both halves. The Outcome Framework is how a promise is
-written down. The capability map is how a project proves it kept it.
+```markdown
+## 0. TLDR
+*(author: Priya, 2026-01-01 — protected: do not rewrite, expand, or paraphrase — human)*
+
+**Outcome:** A member can mute a channel so it stops notifying them.
+**Rules:**
+- A muted channel never sends a push or a badge count until it is unmuted.  → AT-1, AT-2
+- Muting is per member; it never changes what other members see.  → AT-3
+**How we'll know:** Ana mutes a busy channel and gets zero notifications from it
+for a day, then unmutes and notifications resume.
+**Scenarios:** 3 acceptance rows (§6), 2 worked examples (§3).
+
+Agent notes (appended, numbered — never edited into the block above; they sit
+under §0 but do NOT count toward its 40-line budget):
+1. Confirmed there is no existing mute primitive to reuse.
+```
+
+Everything under that block — invariants, mechanism with `file:line` evidence,
+Given/When/Then rows, build phases — is derived from it by the model and checked
+by a linter. The `→ AT-n` tags say which acceptance row tests each rule; `UNTESTED`
+is allowed at `draft` and is a lint error once a human marks the doc `agreed`. The
+whole doc this block opens is [`examples/channel-muting.md`](examples/channel-muting.md);
+what a session looks like on screen is [`examples/transcript.md`](examples/transcript.md).
+
+## The smallest useful path
+
+No config, no project setup, and no capability map (a project's own register of
+promises and their proof — optional, defined below; most projects have none). Four
+steps:
+
+1. `/promise <an idea, a ticket, or a pasted transcript>` — the model interviews you
+   (what is true after this ships; why; what must always or never be true; how we'll
+   know; one concrete example), then writes one doc at `Status: draft`.
+2. You read §0. It should be specific enough that you *could* disagree with it; when
+   you don't, edit `Status:` to `agreed`. The model never types `agreed`.
+3. `/promise arm <doc>` — the model branches, writes the §6 rows as failing tests,
+   commits only those test files, records `Red gate: <sha> <date>` in the header, and
+   — after you have seen the red output and said yes — writes `Status: building`.
+4. Build it. When the work lands, `/promise reconcile <PR>` re-stamps which rules
+   are now tested and logs the decision. You type `shipped`.
+
+## What a script checks, and what is an instruction to the model
+
+| Enforced by a script (deterministic, exit code) | Where |
+|---|---|
+| Doc shape: header, headings, §0 budget, rule format and tags, tag resolution, scenario counts, why-lines, placeholders, `UNTESTED` on `agreed` | `lint_outcome.py` (stable rule ids; one-change fixtures under `tests/fixtures/`) |
+| Every §6 row names the altitude its `Then` asserts on: `data`, `response`, `perception`, `judgement` or `sibling` | `lint_outcome.py ACCEPTANCE_ALTITUDE`; a table with no `Altitude` column is `ALTITUDE_MISSING`, a warning, so older docs keep linting |
+| A `building` doc carries a `Red gate: <sha> <YYYY-MM-DD>` line of the right shape | `lint_outcome.py BUILDING_NEEDS_GATE` |
+| A bridged doc's `Row` ids, snapshot line and `Then` text against the map's current text (a bridged doc is one whose §6 rows `arm` has filed into a map) | `bridge_validate.py` |
+| Project commands run with the caller's text as one argv element, never a composed shell string — inline or read from a file (`--query-file`, `--search-file`) | `adapter.py`, `outcome_rows.py` |
+| A partial map is refused, not run: when `orient.py` reports `mapUsable: false`, `adapter.py` refuses (exit 2) and `bridge_validate.py` reports `MAP_NOT_CONFIGURED`, both naming the missing keys | `orient.py`, `adapter.py`, `bridge_validate.py` |
+| Config key names, field types, paths that escape the project, configured paths that are not on disk, `rowIdPattern` compilation | `orient.py` `warnings[]` |
+
+| Followed by the model — not yet script-enforced | Where the rule lives | Planned script |
+|---|---|---|
+| §0 stays verbatim between revisions; a §0 change drops an `agreed` doc to `draft` | `modes/revise.md` | `diff_outcome.py` |
+| A row is promoted only after a watched kill (mutation → test fails → revert → passes) | `modes/intake.md`, `modes/reconcile.md` | `kill_witness.py` |
+| `arm`'s git preflight, red run, and test-only red-gate commit | `modes/arm.md` | `arm_gate.py` |
+| `agreed` and `shipped` are typed by a human, never by the skill | `SKILL.md`; the wording is locked by `tests/test_status_authority.py` | — |
+| Configured project commands run only after `adapter.py show` has been printed and you have said yes, once per session | the router's first step, orient (`SKILL.md` § Phase 0); `references/config.md` § Trust model | — |
+
+Until the planned scripts ship, `references/anti-rationalizations.md` is the guard on
+the second table.
+
+## The shape of a doc
+
+```
+§0 TLDR        ← protected human block (a mode rule; see the table above): outcome line,
+                 rules as bullets (each tagged → AT-n or UNTESTED), how-we'll-know,
+                 scenario count. ≤ 40 lines.
+§1 Problem     · §2 Outcome     · §3 Worked examples
+§4 Invariants  · §5 Mechanism   · §6 Acceptance (AT-n rows, each with an Altitude; a Row column, added or filled once bridged)
+§7 Build phases · §8 Decisions · §9 Open questions · §10 Out of scope
+```
 
 ## Modes
 
@@ -19,94 +90,169 @@ written down. The capability map is how a project proves it kept it.
 | `/promise revise <doc> <change>` | **revise** — evolve a doc; §0 changes go through the human, with the status consequence stated first |
 | `/promise review <doc or paste>` | **review** — apply the framework as a code-verified rubric to a doc authored elsewhere; paste-ready findings |
 | `/promise merge <docs…>` | **merge** — one doc per capability: fold siblings into a survivor, delete the rest, with the user's yes |
-| `/promise arm <doc>` | **arm** — `agreed → building`: file the §6 rows into the capability map, commit them as red tests first |
-| `/promise intake <feedback>` | **intake** — feedback in, promise changes out: match each item to an existing row, route it, draft Gherkin, name the test and the kill mutation |
-| `/promise reconcile <PR, branch, test file>` | **reconcile** — the work shipped: move a row's verdict only when the evidence reaches the altitude its own `Then` claims |
+| `/promise arm <doc>` | **arm** — `agreed → building`: commit the §6 rows as failing tests first and record the red gate in the doc; with a map, also file them as not-built rows and cite each test in its lane |
+| `/promise intake <feedback>` | **intake** — feedback in, promise changes out: match each item to an existing §6 row (or map row), route it, draft the scenario, name the test and the mutation that would break it |
+| `/promise reconcile <PR, branch, test file>` | **reconcile** — the work shipped: re-stamp §0's tags and log the decision; with a map, move a row's verdict only when the evidence reaches the altitude its own `Then` claims |
 | `/promise adopt` | **adopt** — set a project up: write `.claude/promise.config.json` and a short `CLAUDE.md` section that routes every agent and person to this skill |
 
-Say what you want in plain words. A leading mode word is a shortcut, never a requirement:
-the skill infers the mode from your words and from what it finds in the project, tells you
-which it picked, and asks only when two are genuinely plausible.
+Say what you want in plain words. A leading mode word is a shortcut, never a
+requirement: the skill infers the mode, says which it picked, and asks only when
+two are genuinely plausible.
+
+## Adopt a project
+
+Run `/promise adopt`. It writes `.claude/promise.config.json` if there is none and
+inserts a short fenced section into `CLAUDE.md` so every agent and person in the
+repo is routed to `/promise` before writing a design, plan or spec by hand. Both
+steps are idempotent; `adopt.py --dry-run` shows the diff first. Every field is
+optional. This is the whole config most projects need:
+
+```json
+{
+  "version": 1,
+  "docsHome": "docs/designs",
+  "commands": { "typeCheck": "pnpm type-check", "test": "pnpm test" },
+  "map": null
+}
+```
+
+## If your project keeps a capability map
+
+A *capability map* is a project's own machine-checked register of promises and the
+tests that prove each one: one row per user story, 1–5 Given/When/Then scenarios,
+evidence arrays per test kind, and a verdict (`not-built` / `under-proven` /
+`proven`). **This plugin ships no map and no map tooling.** `find`, `row` and
+`nextId` below are commands *your* project supplies; the plugin only calls them,
+with the query as one argv element. To watch the bridge work before you have a map,
+[`examples/minimap/`](examples/minimap/) is a toy one — a `map.json`, a stdlib
+`capability_find.py`, a `promise.config.json` pointing at it and a `recipe.md` — that
+`arm`, `bridge_validate.py` and `adapter.py` can run against.
+
+With a map configured, `arm` also files the §6 rows as not-built rows (one map row
+per group of 1–5 §6 rows, keyed by §0 rule) and §6 cites the row ids; `intake`
+matches feedback against map rows; `reconcile` promotes a row only when the new
+evidence reaches the altitude its `Then` claims (a database assertion never proves a
+`Then` that says "I see…") and only after a mutation was watched to make the cited
+test fail.
+
+```json
+"map": {
+  "recipe": "docs/how-to/adding-a-capability.md",
+  "find": "scripts/capability-find",
+  "row": "scripts/capability-find --row",
+  "nextId": "scripts/capability-find --next-id",
+  "rowIdPattern": "^CAP-\\d+$",
+  "lanes": { "data": "tests[]", "response": "tests[]", "perception": "e2eTests[]", "judgement": "evalTests[]", "sibling": "siblingTests[]" }
+}
+```
+
+| Doc status | Without a map | With a map |
+|---|---|---|
+| `draft` | The doc is the only home of the promise | Same |
+| `agreed` (human) | No extra step; the doc stays the only home | `arm` files the §6 rows as not-built rows; §6 cites them |
+| `building` | Red tests committed first, failing output in §6, `Red gate: <sha> <date>` in the header | Same, each test cited in the lane its altitude picks |
+| `shipped` (human) | When the rows are green | When every bridged row is proven at its `Then`'s altitude |
+
+`bridge_validate.py` is the staleness check between the two after `agreed`: Row ids,
+the snapshot line under §6, and each row's `Then` against the map's current text.
+
+Full contract: [`references/config.md`](skills/promise/references/config.md).
+Design of the skill itself: [`references/architecture.md`](skills/promise/references/architecture.md).
+
+## Ten words
+
+| Word | Meaning |
+|---|---|
+| **outcome doc** | The one document per capability, in the Outcome Framework shape. |
+| **§0** | Its protected human block: outcome line, rules, how-we'll-know, scenario count. ≤ 40 lines. |
+| **AT-n** | A doc-local acceptance-row id in §6. Stable, append-only. |
+| **red gate** | The commit that contains only the failing tests; its sha in the header is what `building` records. |
+| **capability map / row** | A project's own register of promises and proof; one row = one story + scenarios + evidence + verdict. Optional. |
+| **altitude** | What a `Then` asserts on — `data`, `response`, `perception`, `judgement`, or `sibling` for a claim about another capability — and therefore the only kind of test that can prove it. |
+| **lane** | The kind of test that reaches an altitude, and the evidence array it is cited in (`map.lanes.<altitude>`). |
+| **recipe** | `map.recipe`: the project's own how-to for adding a row. The authority for mechanics; the modes read it and never restate it. |
+| **snapshot line** | The one line under a bridged §6 table (`Snapshot taken at …`) after which §6 is not edited; the map is the source from there. |
+| **kill witness** | A mutation the cited test was watched to catch (a killed mutant, recorded by hand until `kill_witness.py` ships). |
 
 ## What's in the box
 
 ```
 skills/promise/
   SKILL.md                 the router — contract summary, mode table, Phase 0
-  outcome-framework.md     the contract for the doc: template, section rules, lifecycle, rubric
+  outcome-framework.md     the contract for the doc: section rules, lifecycle, rubric; points at the template
   modes/                   one file per mode, loaded only when that mode runs
   references/              architecture.md · slates.md · altitude.md · anti-rationalizations.md · config.md
   templates/               outcome-doc.md · promise.config.example.json · claude-md-section.md
+  agents/                  openai.yaml — Codex skill metadata for the same skill
   scripts/                 orient.py · lint_outcome.py · outcome_rows.py · adopt.py · adapter.py · render_outcome.py · framework_section.py · bridge_validate.py   (Python 3, stdlib only)
-tests/                     unit tests and one-change fixtures for every lint rule
+examples/                  channel-muting.md (a lint-clean doc, not a fixture) · transcript.md (one annotated session) · minimap/ (a three-row capability map with its find/row/next-id script and config)
+tests/                     unit tests and one-change fixtures for the lint rules
 ```
-
-## The shape of a doc
-
-```
-§0 TLDR        ← protected human block: outcome line, rules as bullets (each tagged
-                 → AT-n or UNTESTED), how-we'll-know, scenario count. ≤ 40 lines.
-§1 Problem     · §2 Outcome     · §3 Worked examples
-§4 Invariants  · §5 Mechanism   · §6 Acceptance (AT-n rows; a Row column once bridged)
-§7 Build phases · §8 Decisions · §9 Open questions · §10 Out of scope
-```
-
-## The bridge
-
-| Doc status | Without a capability map | With one |
-|---|---|---|
-| `draft` | The doc is the only home of the promise | Same |
-| `agreed` | — | `arm` files each §6 row as a not-built row; §6 cites them |
-| `building` | Red tests committed first, failing output in §6 | Same, each test cited in the lane its altitude picks |
-| `shipped` | Human flips it when the rows are green | Human flips it when every bridged row is proven at its `Then`'s altitude |
-
-## Adopt a project
-
-Run `/promise adopt`. It writes `.claude/promise.config.json` if there is none and inserts a
-short fenced section into the project's `CLAUDE.md`, so every agent and person working there
-is routed to `/promise` before writing a design, plan or spec doc by hand. Both steps are
-idempotent; `adopt.py --dry-run` shows the diff first. Every config field is optional;
-without a `map` the skill works on documents alone.
-
-```json
-{
-  "docsHome": "docs/designs",
-  "commands": { "typeCheck": "pnpm type-check", "test": "pnpm test" },
-  "map": {
-    "recipe": "docs/testing/how-to-add-a-row.md",
-    "find": "pnpm capability:find",
-    "row": "pnpm capability:find --row",
-    "lanes": { "data": "tests[]", "response": "tests[]", "perception": "e2eTests[]", "judgement": "evalTests[]" }
-  }
-}
-```
-
-Full contract: [`skills/promise/references/config.md`](skills/promise/references/config.md).
-Design of the skill itself: [`skills/promise/references/architecture.md`](skills/promise/references/architecture.md).
 
 ## Scripts
 
+Run these from the `promise/` directory of this repo (inside an adopted project,
+`${CLAUDE_SKILL_DIR}` replaces `skills/promise`). They point at the shipped fixture
+`tests/fixtures/conforming.md`; substitute a doc under your `docsHome`.
+
 ```bash
-python3 skills/promise/scripts/orient.py --mode new          # what the project looks like, as JSON
-python3 skills/promise/scripts/lint_outcome.py docs/designs   # every shape rule, stable ids, exit 1 on findings
-python3 skills/promise/scripts/outcome_rows.py docs/designs/foo.md --json
-python3 skills/promise/scripts/framework_section.py "The contract" "Lifecycle"   # only the sections a mode needs
-python3 skills/promise/scripts/outcome_rows.py --search "login stays private" --dir docs/designs   # which promise covers this?
-python3 skills/promise/scripts/adopt.py --dry-run                 # config + CLAUDE.md section, as a diff
-python3 skills/promise/scripts/adapter.py show                    # the project commands the skill would run; runs nothing
-python3 skills/promise/scripts/render_outcome.py --title "Export a channel" --owner Ana   # a new doc from the template
-python3 skills/promise/scripts/bridge_validate.py docs/designs/foo.md --json   # the bridge's staleness check, against the map
-python3 -m unittest discover -s promise/tests -v              # from the repository root
+python3 skills/promise/scripts/orient.py --mode new                                   # the project, as one JSON object
+python3 skills/promise/scripts/lint_outcome.py tests/fixtures/conforming.md           # every shape rule; stable ids; exit 1 on an error finding
+python3 skills/promise/scripts/outcome_rows.py tests/fixtures/conforming.md --json    # §0 rules + tags, §6 rows with their altitude
+python3 skills/promise/scripts/framework_section.py "The contract" "Lifecycle"        # only the sections a mode needs
+python3 skills/promise/scripts/outcome_rows.py --search "muted channel still notifies" --dir examples   # which promise covers this?
+python3 skills/promise/scripts/lint_outcome.py --template skills/promise/templates/outcome-doc.md   # the bundled template itself; exit 0
+python3 skills/promise/scripts/adopt.py --dry-run                                     # the config + CLAUDE.md section it would write, as a diff
+python3 skills/promise/scripts/adapter.py show                                        # the configured project commands; runs nothing
+python3 skills/promise/scripts/render_outcome.py --title "Export a channel" --owner Ana --docs-home docs/designs --dry-run   # a new doc from the template, printed, nothing written
+python3 skills/promise/scripts/bridge_validate.py tests/fixtures/conforming.md --json # the bridge's staleness check (NOT_BRIDGED on a draft)
+(cd .. && python3 -m unittest discover -s promise/tests -v)                           # the test suite, stdlib only
 ```
+
+A freshly rendered doc fails `lint_outcome.py` with `PLACEHOLDER` findings until its
+`<…>` slots are filled; that is the intended state of a `draft` nobody has interviewed
+for yet. Drop `--dry-run` to write the doc; `--docs-home` is needed only until a config
+or an existing docs folder sets `docsHome`, and a folder that does not exist yet is
+created only with `--create-docs-home`. `lint_outcome.py --template
+skills/promise/templates/outcome-doc.md` is how the bundled template itself is linted
+— the flag exempts its `<…>` and `YYYY-MM-DD` placeholders; every other rule stays active.
 
 ## Install
 
 ```bash
 claude plugin marketplace add osouthgate/content-skills
 claude plugin install promise@content-skills
+# in a project:
+/promise adopt                            # config + CLAUDE.md section
+/promise <idea, ticket, or transcript>    # first outcome doc
 ```
 
-Supersedes the `outcome` plugin, which stays for one release.
+### Codex and other hosts
+
+Codex and Cursor read the same `SKILL.md`, but not from a Claude marketplace
+checkout: copy or symlink `promise/skills/promise/` to `~/.agents/skills/promise`
+(one user) or `<repo>/.agents/skills/promise` (one project), then say
+`$promise <what you want, in plain words>`. Two notations are Claude Code-only —
+`CLAUDE_SKILL_DIR` and the `!`-prefixed load-time line — and the
+"Other hosts" section at the top of `SKILL.md` says how to read them; on Codex,
+run `python3 <skill dir>/scripts/orient.py` yourself as the first step.
+
+## Where the ideas come from
+
+Most of the doc shape is prior art, on purpose: §6 is Cucumber-style scenarios with
+stable ids (a traceability matrix); §8 is an ADR log; §10 is Google-design-doc
+non-goals; `arm` is the failing-test-first gate; the CLAUDE.md section is the
+"constitution"/"steering" pattern of spec-kit and Kiro; the kill witness is a
+killed mutant from mutation testing. What is new here is narrower: the human's
+block is read-only to the model and it may only append notes; rules are never
+offered as a pick-list, because a menu of paraphrases is still a paraphrase; and a
+row's verdict moves only when evidence reaches the altitude the `Then` sentence was
+written at.
+
+The `outcome` plugin was removed in promise 1.2.0; its framework lives on here.
+
+An outcome doc *makes* a promise; a proven row *keeps* it; a defect *breaks* it.
+That is the name.
 
 ## License
 

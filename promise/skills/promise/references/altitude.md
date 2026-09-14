@@ -2,15 +2,20 @@
 
 *What a `Then` asserts on, the only lane that can reach it, and what a verdict is
 allowed to move on. Read before drafting any `Then`, before deciding whether a
-verdict moves, and before recording a kill witness. Cited from `modes/intake.md`,
-`modes/reconcile.md` and `modes/arm.md`.*
+verdict moves, and before recording a kill witness. Cited from `modes/new.md`,
+`modes/intake.md`, `modes/reconcile.md` and `modes/arm.md`.*
 
 Every scenario's `Then` asserts on something. **Altitude** names what kind of thing
 that is — a stored fact, a returned value, a person's experience, a model's
 judgement, or behaviour this project cannot see because it lives elsewhere. The
 altitude a `Then` is written at decides the only kind of test that can prove it.
 
-## The four altitudes, plus sibling
+## The five values
+
+Four altitudes describe what a `Then` asserts on inside this project. The fifth
+value, `sibling`, is not an altitude of this project's own behaviour — it marks a
+`Then` whose proof lives in another repo — but it takes the same column and the same
+lane rule, so the column admits exactly these five.
 
 | Altitude | What the `Then` asserts on | Lane — the kind of test that reaches it | Cited in | What does NOT prove it |
 |---|---|---|---|---|
@@ -24,6 +29,28 @@ A `Then` written as *"I see…"*, *"I am told…"* or *"I land on…"* is percep
 `Then` written as *"is stored"*, *"is recorded"*, or that names a field, is data.
 Read the sentence that was actually written before picking the lane — not the test
 that would be convenient to write.
+
+## The `Altitude` column
+
+Every §6 acceptance row records its altitude in the `Altitude` column, between
+`Then` and `Row` (`templates/outcome-doc.md`; framework § Section rules, §6). The
+value is one of the five words above, exactly as written. It is the left-hand
+operand of the verdict rule below: `reconcile` compares the altitude the evidence
+reaches against the value in this column, not against a re-reading of the `Then`.
+
+The tooling reads and checks it:
+
+- `scripts/lint_outcome.py` — `ACCEPTANCE_ALTITUDE` (error): the column is present
+  and a data cell is empty or not one of the five. `ALTITUDE_MISSING` (warn): a §6
+  table has no `Altitude` header, so a doc written before the column existed still
+  lints; add the column when the doc is next revised.
+- `scripts/outcome_rows.py` — emits `"altitude"` on every row (`null` when the
+  column is absent), so `arm` and `reconcile` read the operand instead of deriving
+  it.
+
+The column states the altitude; it does not prove the `Then` is written at it. A row
+whose `Then` wording and `Altitude` disagree — an *"I see…"* `Then` marked `data` —
+is a review finding: fix the sentence or the value, whichever is wrong.
 
 ## Signal kinds and where they land
 
@@ -51,7 +78,7 @@ Nothing in `map.lanes` names an array for it, and no mode should invent one.
 ## Worked example
 
 A board renders items grouped by state. One scenario's `Then` reads: *"the item does
-not appear anywhere on the board."*
+not appear anywhere on the board."* Its `Altitude` cell says `perception`.
 
 A data-altitude test proves the underlying query excludes the item from its result
 set — a direct call to the query, asserting the excluded item's id is absent from

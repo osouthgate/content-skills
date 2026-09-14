@@ -1,5 +1,5 @@
 Read before this: references/anti-rationalizations.md · outcome-framework.md § The framework as a review rubric · § Section rules
-Phase 0 line: mode `review` (say if inferred), framework source (the rubric's authority), docs home and its source, whether a map is configured, and whether the project is adopted.
+Phase 0 line: mode `review` (say if inferred), framework source (the rubric's authority), docs home and its source, whether a map is configured (orient's `mapUsable`), and whether the project is adopted.
 Writes: nothing in the repo, unless the user asks for a file copy. Findings are delivered inline in chat.
 
 # Review — a doc authored elsewhere
@@ -19,7 +19,18 @@ review rubric is the authority; run it from the section, not from memory.
    findings are usually here.
 3. **Run the rubric.** If the target is a file, also run `python3
    "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py" <doc>` and fold its
-   findings in as the shape half of the rubric. The lint checks shape
+   findings in as the shape half of the rubric. The doc belongs to this
+   project, a map is configured (orient's `mapUsable`) and its `Status:` is
+   past `draft` → also run `python3
+   "${CLAUDE_SKILL_DIR}/scripts/bridge_validate.py" <doc> --strict` (so
+   drift is an error, not a warning) and fold those findings in too: an
+   edited §6 cell surfaces as `THEN_NOT_IN_MAP`, a stripped snapshot line as
+   `SNAPSHOT_LINE_MISSING`, and either is a finding against the doc, since
+   §6 is a snapshot after the bridge. `NOT_BRIDGED` and `MAP_NOT_CONFIGURED`
+   mean there is nothing to check, not a finding. A doc at `agreed` whose §6
+   has no `Row` cell at all and no snapshot line has not been armed; report
+   those findings as "run `arm`", not as drift or as a finding against the
+   doc. The lint checks shape
    mechanically; it cannot check depth — invariants argued with mechanism
    and boundary, evidence pinned to a commit, design-vs-description
    flagged, alternatives rejected with receipts. That half stays yours to

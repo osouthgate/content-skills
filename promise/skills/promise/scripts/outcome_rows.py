@@ -1,14 +1,31 @@
 #!/usr/bin/env python3
-"""Extract one outcome doc's SS0 rules and SS6 acceptance rows as JSON.
+"""Extract one outcome doc's §0 rules and §6 acceptance rows as JSON.
 
     python3 outcome_rows.py doc.md
     python3 outcome_rows.py doc.md --json
+    python3 outcome_rows.py doc.md --write-counts
+    python3 outcome_rows.py --search "<text>" --dir <docsHome>
+    python3 outcome_rows.py --search-file <path> --dir <docsHome>
 
-This is the bridge's input (references/architecture.md SS10): what
-``arm`` reads to file SS6 rows into a capability map, and what
-``reconcile`` reads to re-stamp SS0 tags. Reuses lint_outcome.py's rule
+This is the bridge's input (references/architecture.md §10): what
+``arm`` reads to file §6 rows into a capability map, and what
+``reconcile`` reads to re-stamp §0 tags. Reuses lint_outcome.py's rule
 and table parsing rather than re-implementing it, so the two scripts
-cannot silently disagree on what a rule or a row is.
+cannot silently disagree on what a rule or a row is. Each row carries
+its ``altitude`` — the §6 table's ``Altitude`` cell as lint_outcome.py
+reads it by header name, or null when the table has no such column or
+the cell is empty.
+
+``--search`` takes its query inline; ``--search-file <path>`` (``-`` =
+stdin) reads it from a file instead, so a verbatim feedback item that
+may carry quotes never has to appear on a command line. ``--dir`` names
+the docs folder to scan: the folder plus its immediate subdirectories,
+the same depth lint_outcome.py walks in directory mode. A ``--dir`` that
+does not exist or is not a directory is a refusal (exit 2), never a
+silent "no matches".
+
+Exit 0 on success; 2 on a usage error, an unreadable doc (missing, or not
+UTF-8), or a doc whose ``**Scenarios:**`` line cannot be rewritten.
 """
 
 from __future__ import annotations
@@ -27,6 +44,8 @@ if _SCRIPTS_DIR not in sys.path:
 import lint_outcome  # noqa: E402  (sibling-script import; see path insert above)
 
 UTF8_BOM = b"\xef\xbb\xbf"
+
+WORKED_EXAMPLE_NOUN_RE = re.compile(r"(\s*)worked examples?")
 
 
 def read_text_tolerant(path: str) -> str:
@@ -59,6 +78,7 @@ def extract(path: str) -> Dict[str, Any]:
             "given": row["given"],
             "when": row["when"],
             "then": row["then"],
+            "altitude": row["altitude"],
             "row": row["row"],
         }
         for row in lint_outcome.parse_acceptance_rows(lines)
@@ -76,7 +96,7 @@ def extract(path: str) -> Dict[str, Any]:
 
 
 def locate_scenarios_line(lines: List[str]) -> int:
-    """0-indexed index of the SS0 **Scenarios:** line, or -1 when there is none."""
+    """0-indexed index of the §0 **Scenarios:** line, or -1 when there is none."""
     bounds = lint_outcome.tldr_block_bounds(lines)
     if bounds is None:
         return -1
@@ -88,29 +108,34 @@ def locate_scenarios_line(lines: List[str]) -> int:
 
 
 def rewrite_scenarios_line(line: str, lines: List[str]) -> str:
-    """`line` with only its two counts replaced by the real SS6/SS3 counts.
+    """`line` with its two counts replaced by the real §6/§3 counts, and
+    the worked-example noun pluralised to match.
 
     Reuses lint_outcome.py's own SCENARIOS_RE, parse_acceptance_rows and
     worked_examples, so this can never disagree with what the lint counts.
-    Only the two digit spans are touched — everything else on the line,
-    including the "(SS6)"/"(SS3)" citations and trailing punctuation, is
-    copied through unchanged. The worked-example count (M) is left as-is
-    when SS3 is not parseable the way lint_outcome.py counts it (no
-    ``### `` headings or bold-led paragraphs), matching SCENARIOS_COUNT's
-    own "not checked" case for that half of the line.
+    Only the two digit spans and the ``worked example(s)`` noun right
+    after the second are touched — everything else on the line, including
+    the "(§6)"/"(§3)" citations and trailing punctuation, is copied
+    through unchanged. The worked-example count (M) is left as-is when §3
+    is not parseable the way lint_outcome.py counts it (no ``### ``
+    headings or bold-led paragraphs), matching SCENARIOS_COUNT's own "not
+    checked" case for that half of the line.
     """
     m = lint_outcome.SCENARIOS_RE.search(line)
     if not m:
         raise ValueError(
             "the **Scenarios:** line does not match "
-            "'<N> acceptance rows (§6), <M> worked examples (§3).'"
+            "'<N> acceptance rows (§6), <M> worked example(s) (§3).'"
         )
     n_actual = len(lint_outcome.parse_acceptance_rows(lines))
     ranges, kind = lint_outcome.worked_examples(lines)
     m_value = len(ranges) if kind is not None else int(m.group(2))
+    tail = line[m.end(2):]
+    noun = "worked example" if m_value == 1 else "worked examples"
+    tail = WORKED_EXAMPLE_NOUN_RE.sub(lambda nm: f"{nm.group(1)}{noun}", tail, count=1)
     return (
         line[: m.start(1)] + str(n_actual) + line[m.end(1) : m.start(2)]
-        + str(m_value) + line[m.end(2) :]
+        + str(m_value) + tail
     )
 
 
@@ -153,7 +178,7 @@ def write_counts(path: str) -> Tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# --search: rank SS6 rows and SS0 rules against a query by token overlap
+# --search: rank §6 rows and §0 rules against a query by token overlap
 # ---------------------------------------------------------------------------
 
 STOP_WORDS = {
@@ -185,36 +210,41 @@ def tokenize(text: str) -> List[str]:
 
 
 def contains_tldr_heading(path: str) -> bool:
-    """True when path's text has a line starting the SS0 TLDR heading."""
+    """True when path's text has a line starting the §0 TLDR heading outside
+    any ``` / ~~~ fence — a fenced heading is an illustration, not structure."""
     try:
         text = read_text_tolerant(path)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return False
-    return any(line.startswith(lint_outcome.TLDR_HEADING) for line in text.splitlines())
+    return any(
+        line.startswith(lint_outcome.TLDR_HEADING)
+        for line in lint_outcome.unfenced(text.splitlines())
+    )
 
 
 def collect_search_docs(directory: str) -> List[str]:
-    """*.md files directly under directory (one level deep) with a SS0 TLDR heading.
+    """Every *.md under directory with a §0 TLDR heading, one level of
+    recursion deep — the folder and its immediate subdirectories.
 
-    Matches architecture.md SS5's scan_existing_docs: files listed directly
-    in the directory, not a recursive walk — a project's docsHome is one
-    flat folder, not a tree.
+    Delegates to lint_outcome.py's collect_directory_docs so ``--search``
+    and ``lint_outcome.py <directory>`` always agree on which files are
+    outcome docs and how deep a docs folder goes. An unreadable directory
+    yields no docs rather than raising.
     """
     if not os.path.isdir(directory):
         return []
-    found = []
-    for name in sorted(os.listdir(directory)):
-        if not name.endswith(".md"):
-            continue
-        full = os.path.join(directory, name)
-        if os.path.isfile(full) and contains_tldr_heading(full):
-            found.append(full)
-    return found
+    try:
+        return lint_outcome.collect_directory_docs(directory)
+    except OSError:
+        return []
 
 
 def search_candidates(doc_path: str) -> List[Dict[str, Any]]:
-    """Every SS6 row (by its Then) and SS0 rule in one doc, as scorable candidates."""
-    lines = read_text_tolerant(doc_path).splitlines()
+    """Every §6 row (by its Then) and §0 rule in one doc, as scorable candidates."""
+    try:
+        lines = read_text_tolerant(doc_path).splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
     candidates: List[Dict[str, Any]] = []
     for row in lint_outcome.parse_acceptance_rows(lines):
         candidates.append({"doc": doc_path, "kind": "row", "id": row["id"], "text": row["then"]})
@@ -249,6 +279,25 @@ def score_candidates(query: str, directory: str, limit: int = 8) -> List[Dict[st
     return scored[:limit]
 
 
+def read_search_file(path: str) -> Tuple[Optional[str], Optional[str]]:
+    """The query text in ``path`` (``-`` = stdin), or ``(None, reason)``.
+
+    Read as UTF-8 tolerating a BOM; only trailing line terminators are
+    dropped, since they are the file's, not the query's.
+    """
+    try:
+        if path == "-":
+            text = sys.stdin.read()
+        else:
+            # newline="" keeps an interior CRLF as written; universal-newlines
+            # mode (newline=None) would rewrite it to LF before the child saw it.
+            with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+                text = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, f"cannot read --search-file {path!r}: {exc}"
+    return text.rstrip("\r\n"), None
+
+
 def format_search_human(results: List[Dict[str, Any]]) -> str:
     if not results:
         return "no matches"
@@ -279,11 +328,14 @@ def format_human(data: Dict[str, Any]) -> str:
         given_w = max(len(r["given"]) for r in data["rows"])
         when_w = max(len(r["when"]) for r in data["rows"])
         then_w = max(len(r["then"]) for r in data["rows"])
+        altitude_w = max(len(r["altitude"] or "-") for r in data["rows"])
         for r in data["rows"]:
             row_text = r["row"] or "-"
+            altitude_text = r["altitude"] or "-"
             out.append(
                 f"  {r['id']:<{id_w}}  {r['given']:<{given_w}}  "
-                f"{r['when']:<{when_w}}  {r['then']:<{then_w}}  {row_text}"
+                f"{r['when']:<{when_w}}  {r['then']:<{then_w}}  "
+                f"{altitude_text:<{altitude_w}}  {row_text}"
             )
     else:
         out.append("  (none)")
@@ -294,12 +346,14 @@ def format_human(data: Dict[str, Any]) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     parser = argparse.ArgumentParser(
         prog="outcome_rows.py",
         description=(
-            "Extract an outcome doc's SS0 rules and SS6 acceptance rows. "
+            "Extract an outcome doc's §0 rules and §6 acceptance rows. "
             "--write-counts corrects the doc's Scenarios: line in place; "
-            "--search --dir ranks SS6 rows and SS0 rules across a directory "
+            "--search --dir ranks §6 rows and §0 rules across a directory "
             "of docs by token overlap with a query, in lieu of a capability map."
         ),
     )
@@ -311,8 +365,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--write-counts",
         action="store_true",
         help=(
-            "rewrite the doc's **Scenarios:** counts from the real SS6 row count "
-            "(and the SS3 example count, when SS3 is parseable), in place; "
+            "rewrite the doc's **Scenarios:** counts from the real §6 row count "
+            "(and the §3 example count, when §3 is parseable), in place; "
             "prints 'old: ... / new: ...' to stderr"
         ),
     )
@@ -320,21 +374,47 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--search",
         metavar="TEXT",
         default=None,
-        help="rank SS6 rows and SS0 rules across --dir by token overlap with TEXT",
+        help="rank §6 rows and §0 rules across --dir by token overlap with TEXT",
+    )
+    parser.add_argument(
+        "--search-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "like --search, but read the query from PATH ('-' for stdin); use it "
+            "whenever the text may contain quotes, so it never passes through a shell"
+        ),
     )
     parser.add_argument(
         "--dir",
         metavar="DIRECTORY",
         default=None,
-        help="directory to scan one level deep for --search (every *.md with a SS0 TLDR heading)",
+        help=(
+            "docs folder to scan for --search: the folder and its immediate "
+            "subdirectories (every *.md with a §0 TLDR heading)"
+        ),
     )
     args = parser.parse_args(argv)
 
-    if args.search is not None:
+    if args.search is not None and args.search_file is not None:
+        print("outcome_rows.py: --search and --search-file cannot be combined", file=sys.stderr)
+        return 2
+
+    query = args.search
+    if args.search_file is not None:
+        query, reason = read_search_file(args.search_file)
+        if query is None:
+            print(f"outcome_rows.py: {reason}", file=sys.stderr)
+            return 2
+
+    if query is not None:
         if args.dir is None:
             print("outcome_rows.py: --search requires --dir", file=sys.stderr)
             return 2
-        results = score_candidates(args.search, args.dir)
+        if not os.path.isdir(args.dir):
+            print(f"outcome_rows.py: --dir is not a directory: {args.dir}", file=sys.stderr)
+            return 2
+        results = score_candidates(query, args.dir)
         if args.json:
             print(json.dumps(results, indent=2, ensure_ascii=False))
         else:
@@ -359,8 +439,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         data = extract(args.path)
-    except OSError as exc:
-        print(f"outcome_rows.py: {exc}", file=sys.stderr)
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"outcome_rows.py: cannot read {args.path}: {exc}", file=sys.stderr)
         return 2
 
     if args.json:

@@ -5,14 +5,27 @@ Resolves the framework path, the project config, the docs home, the
 project's type-check/test/lint commands, existing outcome docs, and
 CLAUDE.md adoption state, then prints one JSON object to stdout.
 
-See references/architecture.md SS5 (schema and detection rules) and
-SS6 (config contract). For a valid invocation this script never exits
+See references/architecture.md §5 (schema and detection rules) and
+§6 (config contract). For a valid invocation this script never exits
 non-zero: every problem is recorded in the "warnings" list of the
 emitted JSON instead of raising or failing the process, so a caller
 can always parse stdout as JSON and always finds every schema key
-present (null when unknown). An invocation argparse itself rejects —
-an unrecognised flag, a missing value — still exits 2 with a usage
-message on stderr, as argparse does for every command it parses.
+present (null when unknown). Three things are not valid invocations
+and exit 2 with one line on stderr: an argparse usage error (an
+unrecognised flag, a missing value), a ``--cwd`` that is not a
+directory, and an ``--input-file`` that cannot be read or is not UTF-8.
+
+"mode" is the mode word passed with ``--mode`` (or "infer" for an
+unrecognised word) and null when the flag was not given — the JSON
+never claims a mode nobody asked for.
+
+Config paths (docsHome, plansFolder, frameworkPath) are project-relative
+with forward slashes; a value written with backslashes is normalised to
+forward slashes and warned about, so a config written on one OS reads
+the same on another. A configured docsHome, map.recipe or map.index
+that does not exist on disk is warned about and still returned —
+existence is reported, not enforced, so the first mode to use the path
+can decide what to do.
 """
 
 from __future__ import annotations
@@ -28,8 +41,12 @@ RECOGNISED_MODES = (
     "new", "revise", "review", "merge", "arm", "intake", "reconcile", "adopt",
 )
 
+# "version" is the config's version key; "$schema" is accepted for configs
+# written before it existed and warned about as deprecated.
+CONFIG_VERSION = 1
+
 KNOWN_CONFIG_KEYS = {
-    "$schema", "$comment", "docsHome", "frameworkPath", "plansFolder",
+    "$schema", "$comment", "version", "docsHome", "frameworkPath", "plansFolder",
     "commands", "map",
 }
 
@@ -41,9 +58,15 @@ KNOWN_MAP_KEYS = {
 }
 
 # The map keys that must all be present, as strings (lanes: as an object),
-# before a map counts as configured (architecture.md SS6, "map counts as
-# configured only when...").
+# before a map counts as configured — the mapUsable rule in
+# architecture.md §5.
 MAP_STRING_KEYS = ("recipe", "find", "row")
+
+# The map keys that name a file in the project; each is warned about when
+# it does not exist, without changing mapUsable.
+MAP_FILE_KEYS = ("recipe", "index")
+
+ISSUE_TRACKER_KEYS = ("kind", "repo", "template")
 
 DOCS_HOME_CANDIDATES = (
     "docs/designs", "docs/design", "docs/specs", "docs/rfcs", "design", "docs",
@@ -60,7 +83,7 @@ STATUS_RE = re.compile(r"^Status:\s*(\S+)")
 LAST_DECISION_RE = re.compile(r"Last decision:\s*(\S+)")
 TARGET_NAME_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:(?!=)")
 
-# --- FEATURE 1: --input mode suggestion (architecture.md SS4 rules 1-10) ---
+# --- FEATURE 1: --input mode suggestion (architecture.md §4 rules 1-10) ---
 
 _MODE_WORD_PUNCT = ".,;:!?'\"()[]{}"
 
@@ -76,8 +99,13 @@ RECONCILE_PHRASE_RE = re.compile(
     r"|update the (?:map|row)",
     re.IGNORECASE,
 )
+# Feedback vocabulary, the router's own phrases, and the shape of a plain
+# complaint sentence — "users say X is broken", "customers complain that"
+# — so a single reported sentence leans intake the way a list does.
 INTAKE_WORD_RE = re.compile(
-    r"\b(?:feedback|complaints|bug reports|wishes|feature requests"
+    r"\b(?:feedback|complaints?|complain(?:s|ed|ing)?|bug reports|wishes|feature requests"
+    r"|(?:users?|customers?|people|clients?) (?:say|said|keep saying|report(?:ed)?|are asking|want)"
+    r"|is broken|are broken|does nothing|doesn'?t work|don'?t work|not working"
     r"|what does this map to|map this|turn this into (?:scenarios|gherkins|a scenario)"
     r"|which (?:capability|promise|row) covers|add this as a scenario)\b",
     re.IGNORECASE,
@@ -113,9 +141,12 @@ REVIEW_NO_DOC_VERB_RE = re.compile(
 
 # Reconcile patterns strong enough to stand alone: a commit sha, a feat/fix
 # branch prefix, or a test-file path. A bare ticket number is not among
-# them — see TICKET_NUMBER_RE and RECONCILE_ACCOMPANY_RE below.
+# them — see TICKET_NUMBER_RE and RECONCILE_ACCOMPANY_RE below. A sha here
+# is a 7-40 hex run with at least one letter: a digit-only run is a date
+# or an id as often as a sha, and gets the same treatment as "#1234567" —
+# reconcile only beside a shipped/landed/commit word.
 RECONCILE_STRONG_PATTERN_RE = re.compile(
-    r"\b[0-9a-f]{7,40}\b"
+    r"\b(?=[0-9a-f]{7,40}\b)[0-9]*[a-f][0-9a-f]*\b"
     r"|\b(?:feat|fix)/"
     r"|\.test\."
     r"|\.spec\."
@@ -143,6 +174,23 @@ def read_text_tolerant(path: str) -> str:
         return fh.read()
 
 
+def unfenced(lines: List[str]) -> List[str]:
+    """The same list with every line inside a ``` / ~~~ fenced block (and
+    the fence lines themselves) replaced by "", so a heading scan skips
+    illustrations while indices still line up with the original.
+    """
+    out: List[str] = []
+    in_fence = False
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        out.append("" if in_fence else line)
+    return out
+
+
 def get_skill_dir() -> str:
     """Return the absolute path to skills/promise (the parent of scripts/)."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -153,20 +201,33 @@ def _path_escapes(value: str) -> bool:
     """True when a configured project-relative path is absolute or climbs
     out of the project with a ".." segment.
 
-    Both slash styles are checked so a config written on one OS is judged
-    the same way on another.
+    Both slash styles are checked, and a Windows drive letter (``C:\\x``,
+    ``C:/x``, the drive-relative ``D:docs``) counts as absolute on every
+    OS -- ``os.path.isabs`` alone would pass it on POSIX -- so a config
+    written on one OS is judged the same way on another. adopt.py applies
+    this same rule to ``--docs-home``.
     """
-    if os.path.isabs(value) or value.startswith(("/", "\\")):
+    if os.path.isabs(value) or value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
         return True
     return ".." in re.split(r"[\\/]+", value)
+
+
+def _normalise_slashes(value: str, key: str, warnings: List[str]) -> str:
+    """Turn a backslash-separated config path into the forward-slash form
+    the contract asks for, with a warning naming the key."""
+    if "\\" in value:
+        warnings.append(f"{key} uses backslashes; normalised to forward slashes: {value!r}")
+        return value.replace("\\", "/")
+    return value
 
 
 def load_config(cwd: str) -> Tuple[Optional[dict], Optional[str], List[str]]:
     """Load .claude/promise.config.json, falling back to promise.config.json.
 
     Returns (raw_config_or_None, path_or_None, warnings). Unknown
-    top-level keys warn; "$schema" and "$comment" are always ignored,
-    at the top level and wherever else they appear.
+    top-level keys warn; "$comment" is always ignored, at the top level
+    and wherever else it appears. "version" is the config's version key;
+    a top-level "$schema" is accepted with a deprecation warning.
     """
     warnings: List[str] = []
     candidates = [
@@ -191,6 +252,14 @@ def load_config(cwd: str) -> Tuple[Optional[dict], Optional[str], List[str]]:
         unknown = sorted(k for k in raw.keys() if k not in KNOWN_CONFIG_KEYS)
         for key in unknown:
             warnings.append(f"unknown config key: {key}")
+        if "$schema" in raw:
+            warnings.append(
+                '"$schema" is deprecated; replace it with "version": 1'
+            )
+        if "version" in raw and raw["version"] != CONFIG_VERSION:
+            warnings.append(
+                f"unsupported config version: {raw['version']!r}; this skill reads version {CONFIG_VERSION}"
+            )
         return raw, candidate, warnings
     warnings.append("no config found at .claude/promise.config.json; using detection")
     return None, None, warnings
@@ -214,7 +283,8 @@ def _package_manager_prefix(cwd: str) -> str:
         return "pnpm"
     if os.path.isfile(os.path.join(cwd, "yarn.lock")):
         return "yarn"
-    if os.path.isfile(os.path.join(cwd, "bun.lockb")):
+    # bun.lockb is the binary lockfile; bun.lock the text one Bun 1.2+ writes.
+    if os.path.isfile(os.path.join(cwd, "bun.lockb")) or os.path.isfile(os.path.join(cwd, "bun.lock")):
         return "bun"
     return "npm run"
 
@@ -263,7 +333,7 @@ def _detect_commands_from_makefile(cwd: str) -> Optional[Dict[str, Optional[str]
         return None
     try:
         targets = set(_parse_target_names(read_text_tolerant(path)))
-    except OSError:
+    except (OSError, ValueError):
         return None
     type_check_name = next((n for n in TYPE_CHECK_SCRIPT_NAMES if n in targets), None)
     result = {
@@ -285,7 +355,7 @@ def _detect_commands_from_justfile(cwd: str) -> Optional[Dict[str, Optional[str]
         return None
     try:
         recipes = set(_parse_target_names(read_text_tolerant(path)))
-    except OSError:
+    except (OSError, ValueError):
         return None
     type_check_name = next((n for n in TYPE_CHECK_SCRIPT_NAMES if n in recipes), None)
     result = {
@@ -300,7 +370,7 @@ def detect_commands(cwd: str) -> Dict[str, Optional[str]]:
     """Detect typeCheck/test/lint commands: package.json, else Makefile, else justfile.
 
     The first source that yields at least one command wins outright
-    (architecture.md SS5's "else" chain is a whole-strategy fallback,
+    (architecture.md §5's "else" chain is a whole-strategy fallback,
     not a per-field merge across sources).
     """
     for detector in (
@@ -349,7 +419,13 @@ def resolve_docs_home(
 
     A wrong type or an escaping path warns and is treated as absent, so
     resolution still falls through to detection rather than trusting a
-    value nobody meant to configure.
+    value nobody meant to configure. A configured folder that does not
+    exist yet is warned about and still returned: the config is the
+    project's choice, and the mode that writes there creates it only on
+    the user's say-so (render_outcome.py --create-docs-home). A loaded
+    config that pins no docsHome, in a project where detection finds no
+    docs folder either, is warned about too: every later ``new`` would
+    ask where docs live until someone sets it.
     """
     if isinstance(config, dict) and "docsHome" in config and config["docsHome"] is not None:
         value = config["docsHome"]
@@ -358,10 +434,18 @@ def resolve_docs_home(
         elif _path_escapes(value):
             warnings.append("path escapes the project: docsHome")
         elif value:
+            value = _normalise_slashes(value, "docsHome", warnings)
+            if not os.path.isdir(os.path.join(cwd, value)):
+                warnings.append(f"docsHome does not exist: {value}")
             return value, "config"
     detected = detect_docs_home(cwd)
     if detected is not None:
         return detected, "detected"
+    if isinstance(config, dict):
+        warnings.append(
+            "docsHome is null: no docs folder detected; set docsHome in the config "
+            "or run /promise adopt --docs-home <dir>"
+        )
     return None, "none"
 
 
@@ -377,7 +461,7 @@ def resolve_plans_folder(
         elif _path_escapes(value):
             warnings.append("path escapes the project: plansFolder")
         elif value:
-            return value
+            return _normalise_slashes(value, "plansFolder", warnings)
     return detect_plans_folder(cwd)
 
 
@@ -400,6 +484,7 @@ def resolve_framework_path(
             warnings.append("path escapes the project: frameworkPath")
             return bundled
         if candidate:
+            candidate = _normalise_slashes(candidate, "frameworkPath", warnings)
             abs_candidate = os.path.join(cwd, candidate)
             if os.path.isfile(abs_candidate):
                 return os.path.abspath(abs_candidate), "project"
@@ -409,10 +494,13 @@ def resolve_framework_path(
     return bundled
 
 
-def resolve_map(config: Optional[dict], warnings: List[str]) -> Tuple[Optional[dict], bool]:
+def resolve_map(
+    config: Optional[dict], warnings: List[str], cwd: Optional[str] = None
+) -> Tuple[Optional[dict], bool]:
     """Normalise config["map"]: unknown keys warn, "lanes" is checked for
     being an object of strings, "rowIdPattern" is checked for compiling,
-    and the return says whether the map is usable.
+    "checks" for being an array of strings, "issueTracker" for its three
+    string fields, and the return says whether the map is usable.
 
     A "map" present but not an object warns and is treated as absent —
     there is no detection fallback for a map the way there is for
@@ -422,6 +510,12 @@ def resolve_map(config: Optional[dict], warnings: List[str]) -> Tuple[Optional[d
     when recipe, find, row and lanes are all present with the right
     shape; false when the map is absent or any of those four is missing
     or the wrong type, alongside a warning naming what is missing.
+
+    When ``cwd`` is given, "recipe" and "index" are also checked on disk:
+    a path that escapes the project or does not exist is warned about.
+    Neither changes mapUsable — that stays a shape check, so the map a
+    project configured is the map every script sees — and the map object
+    is returned verbatim, backslashes included.
     """
     if not isinstance(config, dict) or "map" not in config or config["map"] is None:
         return None, False
@@ -455,6 +549,35 @@ def resolve_map(config: Optional[dict], warnings: List[str]) -> Tuple[Optional[d
         except re.error as exc:
             warnings.append(f"map.rowIdPattern does not compile: {row_id_pattern!r}: {exc}")
 
+    checks = raw_map.get("checks")
+    if "checks" in raw_map and not (
+        isinstance(checks, list) and all(isinstance(c, str) for c in checks)
+    ):
+        warnings.append("map.checks is not an array of strings")
+
+    tracker = raw_map.get("issueTracker")
+    if "issueTracker" in raw_map and not (
+        isinstance(tracker, dict)
+        and all(isinstance(tracker.get(k), str) for k in ISSUE_TRACKER_KEYS)
+    ):
+        warnings.append(
+            "map.issueTracker is not an object with string kind, repo, template"
+        )
+
+    if cwd is not None:
+        for key in MAP_FILE_KEYS:
+            rel = raw_map.get(key)
+            if not isinstance(rel, str) or not rel:
+                continue
+            if _path_escapes(rel):
+                warnings.append(f"path escapes the project: map.{key}")
+                continue
+            if "\\" in rel:
+                warnings.append(f"map.{key} uses backslashes; use forward slashes: {rel!r}")
+                rel = rel.replace("\\", "/")
+            if not os.path.isfile(os.path.join(cwd, rel)):
+                warnings.append(f"map.{key} does not exist: {rel}")
+
     return raw_map, usable
 
 
@@ -467,7 +590,7 @@ def detect_claude_md(cwd: str) -> Dict[str, Any]:
         if os.path.isfile(candidate):
             try:
                 text = read_text_tolerant(candidate)
-            except OSError:
+            except (OSError, ValueError):
                 text = ""
             return {
                 "path": os.path.abspath(candidate),
@@ -476,25 +599,51 @@ def detect_claude_md(cwd: str) -> Dict[str, Any]:
     return {"path": None, "hasPromiseSection": False}
 
 
-def scan_existing_docs(cwd: str, docs_home: Optional[str]) -> List[Dict[str, Any]]:
-    """Every *.md directly under docsHome (one level deep) with a SS0 TLDR heading."""
+def scan_existing_docs(
+    cwd: str, docs_home: Optional[str], warnings: Optional[List[str]] = None
+) -> List[Dict[str, Any]]:
+    """Every *.md under docsHome, one level deep -- the folder and its
+    immediate subdirectories, the same scan lint_outcome.py and
+    outcome_rows.py --search use -- whose §0 TLDR heading sits outside any
+    fenced code block.
+
+    Headings inside a ``` / ~~~ fence are illustrations, not structure,
+    so a framework copy or a doc quoting the template is not listed as
+    an outcome doc, and the title/status/date lookups skip fenced text
+    too. A file that cannot be read or is not UTF-8 is skipped with a
+    warning when a warnings list is given; a subdirectory that cannot be
+    listed is skipped the same way.
+    """
     if not docs_home:
         return []
     docs_dir = os.path.join(cwd, docs_home)
     if not os.path.isdir(docs_dir):
         return []
-    results = []
+    candidates: List[Tuple[str, str]] = []  # (relative path under docsHome, absolute path)
     for name in sorted(os.listdir(docs_dir)):
-        if not name.endswith(".md"):
-            continue
         full = os.path.join(docs_dir, name)
-        if not os.path.isfile(full):
-            continue
+        if os.path.isfile(full) and name.endswith(".md"):
+            candidates.append((name, full))
+        elif os.path.isdir(full):
+            try:
+                inner = sorted(os.listdir(full))
+            except OSError as exc:
+                if warnings is not None:
+                    warnings.append(f"skipped unreadable folder {docs_home}/{name}: {exc}")
+                continue
+            for name2 in inner:
+                full2 = os.path.join(full, name2)
+                if os.path.isfile(full2) and name2.endswith(".md"):
+                    candidates.append((f"{name}/{name2}", full2))
+    results = []
+    for name, full in candidates:
         try:
             text = read_text_tolerant(full)
-        except OSError:
+        except (OSError, ValueError) as exc:
+            if warnings is not None:
+                warnings.append(f"skipped unreadable doc {docs_home}/{name}: {exc}")
             continue
-        lines = text.splitlines()
+        lines = unfenced(text.splitlines())
         if not any(line.startswith(TLDR_HEADING) for line in lines):
             continue
         title = None
@@ -579,7 +728,7 @@ def suggest_mode(
     existing_docs: List[Dict[str, Any]],
     map_value: Optional[dict],
 ) -> Tuple[Optional[str], List[str], List[str], bool]:
-    """A mode hint for the --input text (architecture.md SS4's dispatch table).
+    """A mode hint for the --input text (architecture.md §4's dispatch table).
 
     A recognised first word wins outright and skips every check below it —
     there is nothing left to be ambiguous with. Otherwise each remaining
@@ -723,13 +872,7 @@ def build_orientation(
     warnings: List[str] = []
     cwd = os.path.abspath(cwd_arg) if cwd_arg else os.path.abspath(os.getcwd())
     skill_dir = get_skill_dir()
-
-    if not mode_arg:
-        mode = "new"
-    elif mode_arg in RECOGNISED_MODES:
-        mode = mode_arg
-    else:
-        mode = "infer"
+    mode = _mode_word(mode_arg)
 
     try:
         raw_config, config_path, config_warnings = load_config(cwd)
@@ -765,7 +908,7 @@ def build_orientation(
         warnings.append(f"frameworkPath resolution failed: {exc}")
 
     try:
-        map_value, map_usable = resolve_map(raw_config, warnings)
+        map_value, map_usable = resolve_map(raw_config, warnings, cwd)
     except Exception as exc:  # pragma: no cover
         map_value, map_usable = None, False
         warnings.append(f"map resolution failed: {exc}")
@@ -777,7 +920,7 @@ def build_orientation(
         warnings.append(f"claudeMd detection failed: {exc}")
 
     try:
-        existing_docs = scan_existing_docs(cwd, docs_home)
+        existing_docs = scan_existing_docs(cwd, docs_home, warnings)
     except Exception as exc:  # pragma: no cover
         existing_docs = []
         warnings.append(f"existingDocs scan failed: {exc}")
@@ -827,20 +970,24 @@ def build_orientation(
     }
 
 
+def _mode_word(mode_arg: Optional[str]) -> Optional[str]:
+    """The "mode" value: the recognised word, "infer" for an unrecognised
+    one, null when no --mode was passed."""
+    if not mode_arg:
+        return None
+    if mode_arg in RECOGNISED_MODES:
+        return mode_arg
+    return "infer"
+
+
 def _fallback_result(mode_arg: Optional[str], cwd_arg: Optional[str], error: Exception) -> Dict[str, Any]:
     """Absolute last resort so the process can still print a valid, complete schema."""
     cwd = os.path.abspath(cwd_arg) if cwd_arg else os.path.abspath(os.getcwd())
     skill_dir = get_skill_dir()
-    if not mode_arg:
-        mode = "new"
-    elif mode_arg in RECOGNISED_MODES:
-        mode = mode_arg
-    else:
-        mode = "infer"
     return {
         "skillDir": skill_dir,
         "cwd": cwd,
-        "mode": mode,
+        "mode": _mode_word(mode_arg),
         "frameworkPath": os.path.join(skill_dir, "outcome-framework.md"),
         "frameworkSource": "bundled",
         "config": {"path": None, "loaded": False, "raw": {}},
@@ -867,10 +1014,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Resolve promise skill Phase 0 orientation (framework, config, "
             "docs home, commands, existing docs, CLAUDE.md adoption) and "
             "print it as one JSON object. Exits 0 for any valid invocation; "
-            "a usage error (an unrecognised flag) exits 2."
+            "a usage error (an unrecognised flag), a --cwd that is not a "
+            "directory, or an --input-file that cannot be read exits 2."
         ),
     )
-    parser.add_argument("--mode", default=None, help="the mode word the skill was invoked with")
+    parser.add_argument(
+        "--mode", default=None,
+        help="the mode word the skill was invoked with; without it the JSON says \"mode\": null",
+    )
     parser.add_argument(
         "--cwd", default=None, help="project root to orient against (default: current directory)"
     )
@@ -880,7 +1031,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=(
             "the user's full argument string; when given, the JSON gains "
             "suggestedMode, signals and ambiguous (a router hint, "
-            "architecture.md SS4)"
+            "architecture.md §4)"
         ),
     )
     parser.add_argument(
@@ -890,6 +1041,14 @@ def main(argv: Optional[List[str]] = None) -> int:
              "use it whenever the message may contain quotes, so it never passes through a shell",
     )
     args = parser.parse_args(argv)
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+
+    if args.cwd is not None and not os.path.isdir(args.cwd):
+        print(f"orient.py: no such directory: {args.cwd}", file=sys.stderr)
+        return 2
+
     if getattr(args, "input_file", None):
         try:
             if args.input_file == "-":
@@ -897,6 +1056,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             else:
                 with open(args.input_file, "r", encoding="utf-8-sig") as fh:
                     args.input = fh.read()
+        except UnicodeDecodeError as exc:
+            print(f"orient.py: --input-file is not UTF-8: {exc}", file=sys.stderr)
+            return 2
         except OSError as exc:
             print(f"orient.py: cannot read --input-file: {exc}", file=sys.stderr)
             return 2

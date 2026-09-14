@@ -15,11 +15,24 @@ row — read through `adapter.py`, never a shell string composed from
 configuration plus doc content, so a row id (however it is spelled) always
 travels as exactly one argv element.
 
-A doc still at `draft` or `superseded-by` has not been bridged at all,
-checked before anything else: `bridged: false` is reported and no other
-check runs, whether or not a map is configured. Only once the doc's own
-status clears that does an unconfigured `map` become the finding — there
-is nothing to validate a bridged doc against.
+The `Then` comparison (THEN_NOT_IN_MAP) is a normalised-substring check and
+nothing more: both sides are lower-cased, stripped of punctuation and of a
+leading "Then"/"And", and the doc's `Then` must occur somewhere inside the
+map's text. It catches a row whose text was rewritten and a §6 cell edited
+after the snapshot; it does not catch a map scenario that kept the doc's
+sentence and appended a contradicting clause. It is a canary, not a proof
+of agreement.
+
+The doc's own `Status:` decides first. A `Status:` that is missing or not
+one of the five tokens is reported as STATUS_UNKNOWN (error) and nothing
+else runs — the script cannot tell whether such a doc has been bridged. A
+doc still at `draft` or `superseded-by` has not been bridged at all:
+`bridged: false` is reported and no other check runs, whether or not a map
+is configured. Only once the doc's own status clears that does an
+unconfigured map become the finding — there is nothing to validate a
+bridged doc against. "Configured" means orient's `mapUsable`: a map that
+is present but incomplete is MAP_NOT_CONFIGURED too, and the message names
+the keys orient found missing.
 
 Exit 0 when there are no error-severity findings; 1 when there are (or, under
 --strict, any warning); 2 on a usage error. Human output is one line per
@@ -52,6 +65,9 @@ ADAPTER_PATH = os.path.join(_SCRIPTS_DIR, "adapter.py")
 
 BRIDGE_REQUIRED_STATUSES = ("agreed", "building", "shipped")
 NOT_BRIDGED_STATUSES = ("draft", "superseded-by")
+VALID_STATUSES = ("draft", "agreed", "building", "shipped", "superseded-by")
+
+MAP_INCOMPLETE_PREFIX = "map incomplete"
 
 SNAPSHOT_LINE_RE = re.compile(r"^[`*]*\s*snapshot taken at\b", re.IGNORECASE)
 LEADING_THEN_AND_RE = re.compile(r"^(then|and)\b[\s:,-]*", re.IGNORECASE)
@@ -83,7 +99,10 @@ def normalize(text: str) -> str:
     """Lower-case; drop a leading ``then``/``and`` keyword; strip punctuation
     to spaces; collapse whitespace. Used to compare a §6 ``Then`` against the
     map's own current scenario text without either side's exact wording of
-    connectives or punctuation defeating a real match."""
+    connectives or punctuation defeating a real match. The comparison itself
+    is ``normalize(then) in normalize(map_text)`` — a substring check, so a
+    map text that still contains the doc's sentence passes whatever else it
+    now says around it."""
     lowered = (text or "").strip().lower()
     lowered = LEADING_THEN_AND_RE.sub("", lowered, count=1)
     no_punct = NON_WORD_RE.sub(" ", lowered)
@@ -160,10 +179,21 @@ def finalize(
     }
 
 
+def _map_incomplete_reason(orientation: Dict[str, Any]) -> Optional[str]:
+    """orient's own 'map incomplete: missing …' warning, when it issued one."""
+    for warning in orientation.get("warnings") or []:
+        if isinstance(warning, str) and warning.startswith(MAP_INCOMPLETE_PREFIX):
+            return warning
+    return None
+
+
 def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
     orientation = orient.build_orientation(None, cwd)
     map_value = orientation.get("map")
-    map_configured = isinstance(map_value, dict)
+    # orient's mapUsable is the one source of "is a map configured": a
+    # map that is present but incomplete counts as not configured here,
+    # exactly as it does for the modes and for adapter.py.
+    map_configured = isinstance(map_value, dict) and bool(orientation.get("mapUsable"))
 
     try:
         text = lint_outcome.read_text_tolerant(doc_path)
@@ -174,6 +204,23 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
     lines = text.splitlines()
     status = lint_outcome.get_status(lines)
     six_line = section6_heading_line(lines)
+
+    # The doc's own Status: is read first, and a status the script cannot
+    # place — missing, or not one of the five tokens — is its own error:
+    # such a doc is neither bridged nor known to be unbridged, so nothing
+    # below (ROW_MISSING included) can be judged and none of it runs.
+    if status not in VALID_STATUSES:
+        shown = status if status is not None else "(missing)"
+        findings = [
+            finding(
+                "STATUS_UNKNOWN",
+                None,
+                f"Status: {shown} is not one of {', '.join(VALID_STATUSES)} — "
+                "cannot tell whether this doc has been bridged",
+                "error",
+            )
+        ]
+        return finalize(doc_path, status, False, map_configured, [], findings, strict)
 
     # NOT_BRIDGED is checked on the doc's own status alone, before the map
     # check: a doc still at draft/superseded-by has not been bridged
@@ -193,14 +240,11 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
         return finalize(doc_path, status, False, map_configured, [], findings, strict)
 
     if not map_configured:
-        findings = [
-            finding(
-                "MAP_NOT_CONFIGURED",
-                six_line,
-                "no map is configured for this project — there is nothing to validate the bridge against",
-                "error",
-            )
-        ]
+        message = "no map is configured for this project — there is nothing to validate the bridge against"
+        incomplete = _map_incomplete_reason(orientation) if isinstance(map_value, dict) else None
+        if incomplete:
+            message = f"{incomplete} — the map is treated as not configured; there is nothing to validate the bridge against"
+        findings = [finding("MAP_NOT_CONFIGURED", six_line, message, "error")]
         return finalize(doc_path, status, False, False, [], findings, strict)
 
     data = outcome_rows.extract(doc_path)
@@ -240,6 +284,9 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
             )
     pattern_usable = compiled_pattern is not None
 
+    # mapUsable already requires map.row to be a string; an empty string
+    # still passes that and configures nothing, which is the one way this
+    # finding is still reachable.
     row_command = map_value.get("row")
     row_command_configured = isinstance(row_command, str) and bool(row_command)
     if not row_command_configured:
@@ -311,6 +358,8 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
             rows_out.append(entry)
             continue
 
+        # A normalised-substring check (see the module docstring): the
+        # doc's Then must still occur inside the map's current text.
         then_norm = normalize(r["then"])
         in_sync = (not then_norm) or (then_norm in normalize(map_text))
         entry["inSync"] = in_sync
@@ -321,7 +370,8 @@ def validate(doc_path: str, cwd: str, strict: bool) -> Dict[str, Any]:
                     "THEN_NOT_IN_MAP",
                     line_no,
                     f"{row_id}'s Then no longer appears in {row_value}'s scenario text in the "
-                    "map — the map has moved on since the snapshot, or the row was filed differently",
+                    "map — the map has moved on since the snapshot, the row was filed "
+                    "differently, or §6 was edited after the snapshot was taken",
                     "warn",
                 )
             )
@@ -369,6 +419,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
 

@@ -24,10 +24,9 @@ either.
    - **Commits you to —** the mechanism it forces and the option it rules out.
    - **Think about —** what it leaves unsaid; the reading under which it is satisfied
      but the user would still be unhappy.
-4. **Recommended-first, scored** (architecture § Rules for every file in this skill —
-   every choice put to the user). One candidate is marked **(Recommended)** and listed
-   first, with one concrete reason. Every candidate — "none of these" included — carries
-   a completeness score, 1–10: how fully it captures the outcome as understood so far,
+4. **Recommended-first** (architecture § Rules for every file in this skill — every
+   choice put to the user). One candidate is marked **(Recommended)** and listed first,
+   with one concrete reason: how fully it captures the outcome as understood so far,
    not how likely it is to be picked.
 5. **"None of these — here's mine" is always on offer and never last.** It is a real
    option, not a footnote.
@@ -53,11 +52,10 @@ does not extend to the rules (below).
    - **(b)** a demo someone watches
    - **(c)** a number in prod that must hold, at a value
    - **(d)** a claim the team can now make to a customer
-3. **Recommended-first, scored** — the same rule as the outcome-line slate: one
-   candidate marked **(Recommended)** with one concrete reason, listed first; every
-   candidate scored 1–10 on completeness.
+3. **Recommended-first** — the same rule as the outcome-line slate: one candidate
+   marked **(Recommended)** with one concrete reason, listed first.
 4. **Name the anti-pattern in the options list, don't just avoid it.** "The acceptance
-   tests pass" duplicates §6 (framework § Acceptance) and decides nothing new — the
+   tests pass" duplicates §6 (framework § Section rules) and decides nothing new — the
    signal in §0 should buy something §6 doesn't. Listing it as a labelled non-example is
    more useful than silently omitting it.
 5. **Placeholders are banned.** A blank in the file is indistinguishable from a decision

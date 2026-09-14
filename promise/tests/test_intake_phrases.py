@@ -1,7 +1,9 @@
-"""The three intake phrasings from the router's dispatch table resolve to `intake`.
+"""The intake phrasings from the router's dispatch table resolve to `intake`.
 
 A person who says what they want in plain words must land on the right mode; these
-are the table's own examples, so each is a regression test.
+are the table's own examples, so each is a regression test. The last three are
+plain complaint sentences — the most natural intake input is one reported
+sentence, not a bulleted list, and it leans intake on the same terms.
 """
 from __future__ import annotations
 
@@ -20,6 +22,9 @@ PHRASES = [
     "turn this into scenarios / gherkins",
     "which capability covers muting a room",
     "add this as a scenario to the muted rooms row",
+    "users say login is broken and export is slow",
+    "users keep saying the export button does nothing and the csv is empty",
+    "customers complain that search returns nothing",
 ]
 
 

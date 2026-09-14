@@ -1,5 +1,5 @@
 {
-  "$schema": "promise.config/v1",
+  "version": 1,
   "commands": {
     "typeCheck": "python3 ../scripts/ok.py",
     "test": "python3 ../scripts/ok.py",
@@ -11,6 +11,12 @@
     "row": "python3 ../scripts/echo_args.py",
     "nextId": "python3 ../scripts/echo_args.py",
     "rowIdPattern": "^C\\d+[a-z]?$",
+    "lanes": {
+      "data": "tests[]",
+      "response": "tests[]",
+      "perception": "checks[]",
+      "judgement": "notes"
+    },
     "checks": [
       "python3 ../scripts/ok.py",
       "python3 ../scripts/ok.py"

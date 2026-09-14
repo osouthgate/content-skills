@@ -66,6 +66,21 @@ def fixture_command(name: str, *extra_args: str) -> str:
     return " ".join(parts)
 
 
+def complete_map(**overrides) -> dict:
+    """A map orient reports as usable (recipe, find, row strings; lanes an
+    object of strings), with any key overridden or added. Tests that want
+    one op's command absent build on this, so that absence — not an
+    incomplete map — is what the adapter refuses on."""
+    value = {
+        "recipe": "docs/how-to/adding-a-row.md",
+        "find": fixture_command("echo_args.py"),
+        "row": fixture_command("echo_args.py"),
+        "lanes": {"data": "tests[]"},
+    }
+    value.update(overrides)
+    return value
+
+
 class ScriptsExistTests(unittest.TestCase):
     def test_scripts_exist(self):
         for path in (ADAPTER, RENDER):
@@ -118,6 +133,30 @@ class AdapterShowTests(unittest.TestCase):
             # never configured (nextId) or explicitly null (lint) -> never listed
             self.assertNotIn("map.nextId", result.stdout)
             self.assertNotIn("commands.lint", result.stdout)
+            # the map above lacks recipe and lanes: still printed, so the
+            # person sees what they wrote, plus one line saying why its
+            # operations would refuse.
+            self.assertIn("# map incomplete: missing recipe, lanes", result.stdout)
+
+    def test_show_with_a_complete_map_carries_no_incomplete_note(self):
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "show")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("map incomplete", result.stdout)
+
+    def test_show_with_nothing_configured_says_so_instead_of_printing_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run(ADAPTER, "--cwd", tmp, "show")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertIn("# nothing configured", result.stdout)
+
+    def test_show_marks_a_non_string_command_instead_of_printing_it_as_runnable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": complete_map(nextId=123)})
+            result = run(ADAPTER, "--cwd", str(project), "show")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("map.nextId: 123 (not a string)", result.stdout)
 
     def test_show_ignores_json_flag_and_still_runs_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -181,13 +220,146 @@ class AdapterFindTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.stdout, "")  # a refusal is never JSON — nothing ran to report
 
-    def test_map_present_but_find_not_configured_is_exit_2(self):
+    def test_incomplete_map_refuses_and_names_the_missing_keys(self):
+        # orient's mapUsable is the one source of "is a map configured":
+        # a map with only `row` is not a map, so `find` refuses before
+        # anything runs — even though `row` alone would have been runnable.
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             write_config(project, {"map": {"row": "echo hi"}})
             result = run(ADAPTER, "--cwd", str(project), "find", "whatever")
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("map.find", result.stderr)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("map incomplete: missing recipe, find, lanes", result.stderr)
+
+    def test_incomplete_map_refuses_the_op_it_could_have_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": {"row": fixture_command("echo_args.py")}})
+            result = run(ADAPTER, "--cwd", str(project), "--json", "row", "C1")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            # echo_args.py would have printed a repr(...) line to the JSON;
+            # an empty stdout is direct evidence it never ran.
+            self.assertEqual(result.stdout, "")
+            self.assertIn("map incomplete", result.stderr)
+            self.assertIn("lanes", result.stderr)
+
+    def test_complete_map_with_next_id_absent_is_exit_2_naming_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": complete_map()})
+            result = run(ADAPTER, "--cwd", str(project), "next-id")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("map.nextId", result.stderr)
+            self.assertNotIn("map incomplete", result.stderr)
+
+    def test_non_string_required_command_is_an_incomplete_map(self):
+        # find is one of the keys mapUsable requires as a string, so a
+        # number there is orient's "map incomplete", named as such.
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": complete_map(find=123)})
+            result = run(ADAPTER, "--cwd", str(project), "find", "whatever")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("map incomplete: missing find", result.stderr)
+            self.assertNotIn("internal error", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_non_string_optional_command_is_a_plain_refusal_not_an_internal_error(self):
+        # nextId is optional, so orient leaves the map usable; the adapter
+        # itself must then say the value is not a string, never
+        # "internal error: 'int' object has no attribute 'read'".
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": complete_map(nextId=123)})
+            result = run(ADAPTER, "--cwd", str(project), "--json", "next-id")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("map.nextId is not a string", result.stderr)
+            self.assertNotIn("internal error", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
+
+class AdapterQueryFileTests(unittest.TestCase):
+    """``find --query-file`` reads the query from a file (or stdin), so the
+    text never has to appear on a command line; it still reaches the child
+    as exactly one argv element."""
+
+    def setUp(self):
+        self.addCleanup(lambda: MARKER.unlink(missing_ok=True))
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.query_file = Path(self._tmp.name) / "item.txt"
+
+    def test_payload_is_a_genuine_positive_control(self):
+        # The same proof AdapterFindTests makes: the payload really would
+        # create MARKER under a shell, so its absence below means something.
+        self.assertFalse(MARKER.exists())
+        subprocess.run(f'true "{HOSTILE_QUERY}"', shell=True)
+        self.assertTrue(MARKER.exists())
+
+    def test_hostile_query_from_file_arrives_verbatim_as_one_argument(self):
+        # A Write tool or an editor ends the file in a newline; that
+        # newline is the file's, not the query's, and is the only thing
+        # dropped.
+        self.query_file.write_text(HOSTILE_QUERY + "\n", encoding="utf-8")
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "find", "--query-file", str(self.query_file))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["argv"][-1], HOSTILE_QUERY)
+        self.assertEqual(data["argv"].count(HOSTILE_QUERY), 1)
+        self.assertEqual(data["stdout"], repr([HOSTILE_QUERY]) + "\n")
+        self.assertFalse(MARKER.exists(), "a query read from a file must never reach a shell")
+
+    def test_stdin_dash_reads_the_query_from_stdin(self):
+        result = subprocess.run(
+            [sys.executable, str(ADAPTER), "--cwd", str(MINIREPO), "--json", "find", "--query-file", "-"],
+            input=HOSTILE_QUERY + "\n",
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["argv"][-1], HOSTILE_QUERY)
+        self.assertFalse(MARKER.exists())
+
+    def test_a_bom_is_tolerated_and_interior_newlines_are_kept(self):
+        self.query_file.write_bytes(b"\xef\xbb\xbf" + "line one\nline two\n".encode("utf-8"))
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "find", "--query-file", str(self.query_file))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["argv"][-1], "line one\nline two")
+
+    def test_an_interior_crlf_reaches_the_child_verbatim(self):
+        # A file pasted from a Windows editor: the interior CRLF is part of
+        # the query and arrives as written; only the trailing terminator is
+        # the file's.
+        self.query_file.write_bytes(b"line one\r\nline two\r\n")
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "find", "--query-file", str(self.query_file))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["argv"][-1], "line one\r\nline two")
+
+    def test_missing_query_file_is_exit_2_without_running_anything(self):
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "find", "--query-file", str(self.query_file))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("--query-file", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_query_and_query_file_together_is_exit_2(self):
+        self.query_file.write_text("x", encoding="utf-8")
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "find", "inline", "--query-file", str(self.query_file))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+
+    def test_neither_query_nor_query_file_is_exit_2(self):
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "find")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--query-file", result.stderr)
+
+    def test_help_documents_query_file(self):
+        result = run(ADAPTER, "find", "-h")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--query-file", result.stdout)
 
 
 class AdapterRowTests(unittest.TestCase):
@@ -230,13 +402,13 @@ class AdapterChecksTests(unittest.TestCase):
             write_config(
                 project,
                 {
-                    "map": {
-                        "checks": [
+                    "map": complete_map(
+                        checks=[
                             fixture_command("ok.py"),
                             fixture_command("fail.py"),
                             fixture_command("touch_marker.py", str(marker)),
                         ]
-                    }
+                    )
                 },
             )
             result = run(ADAPTER, "--cwd", str(project), "--json", "checks")
@@ -257,10 +429,32 @@ class AdapterChecksTests(unittest.TestCase):
     def test_missing_checks_key_is_exit_2(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
-            write_config(project, {"map": {"find": "echo hi"}})
+            write_config(project, {"map": complete_map()})
             result = run(ADAPTER, "--cwd", str(project), "checks")
             self.assertEqual(result.returncode, 2)
             self.assertIn("map.checks", result.stderr)
+
+    def test_non_string_check_is_reported_as_a_step_and_stops_the_sequence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            marker = project / "ran.marker"
+            write_config(
+                project,
+                {
+                    "map": complete_map(
+                        checks=[fixture_command("ok.py"), 123, fixture_command("touch_marker.py", str(marker))]
+                    )
+                },
+            )
+            result = run(ADAPTER, "--cwd", str(project), "--json", "checks")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertNotIn("internal error", result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual([d["op"] for d in data], ["checks[0]", "checks[1]"])
+            self.assertEqual(data[1]["exit"], 2)
+            self.assertIn("not a string", data[1]["stderr"])
+            self.assertFalse(marker.exists(), "the step after the bad entry must never run")
 
 
 class AdapterVerifyTests(unittest.TestCase):
@@ -288,12 +482,53 @@ class AdapterVerifyTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(json.loads(result.stdout), [])
 
+    def test_only_runs_the_named_command_alone(self):
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "verify", "--only", "test")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual([d["op"] for d in data], ["test"])
+
+    def test_only_is_repeatable_and_keeps_the_configured_order(self):
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "--json", "verify", "--only", "lint", "--only", "typeCheck")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual([d["op"] for d in data], ["typeCheck", "lint"])
+
+    def test_only_lets_the_tests_run_when_typecheck_would_have_stopped_the_sequence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(
+                project,
+                {"commands": {"typeCheck": fixture_command("fail.py"), "test": fixture_command("ok.py"), "lint": None}},
+            )
+            full = run(ADAPTER, "--cwd", str(project), "--json", "verify")
+            self.assertEqual(full.returncode, 3)
+            self.assertEqual([d["op"] for d in json.loads(full.stdout)], ["typeCheck"])
+            only = run(ADAPTER, "--cwd", str(project), "--json", "verify", "--only", "test")
+            self.assertEqual(only.returncode, 0, only.stdout + only.stderr)
+            self.assertEqual([d["op"] for d in json.loads(only.stdout)], ["test"])
+
+    def test_only_rejects_an_unknown_name(self):
+        result = run(ADAPTER, "--cwd", str(MINIREPO), "verify", "--only", "build")
+        self.assertEqual(result.returncode, 2)
+
+    def test_non_string_verify_command_is_a_step_with_exit_2_not_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"commands": {"typeCheck": 42, "test": fixture_command("ok.py"), "lint": None}})
+            result = run(ADAPTER, "--cwd", str(project), "--json", "verify")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual([d["op"] for d in data], ["typeCheck"])
+            self.assertIn("not a string", data[0]["stderr"])
+
 
 class AdapterExecutableNotFoundTests(unittest.TestCase):
     def test_not_found_executable_is_exit_127_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
-            write_config(project, {"map": {"find": "definitely-not-a-real-executable-xyz123"}})
+            write_config(project, {"map": complete_map(find="definitely-not-a-real-executable-xyz123")})
             result = run(ADAPTER, "--cwd", str(project), "--json", "find", "hello")
             self.assertEqual(result.returncode, 127, result.stdout + result.stderr)
             data = json.loads(result.stdout)
@@ -306,7 +541,7 @@ class AdapterExecutableNotFoundTests(unittest.TestCase):
             project = Path(tmp)
             write_config(
                 project,
-                {"map": {"checks": [fixture_command("ok.py"), "definitely-not-a-real-executable-xyz123"]}},
+                {"map": complete_map(checks=[fixture_command("ok.py"), "definitely-not-a-real-executable-xyz123"])},
             )
             result = run(ADAPTER, "--cwd", str(project), "--json", "checks")
             self.assertEqual(result.returncode, 127, result.stdout + result.stderr)
@@ -470,6 +705,9 @@ class RenderOutcomeSlugTests(unittest.TestCase):
 
     def slug_of(self, title: str) -> str:
         with tempfile.TemporaryDirectory() as tmp:
+            # render_outcome.py never creates a docs folder unprompted, and
+            # a dry run checks the folder the same way a real run does.
+            (Path(tmp) / "docs" / "designs").mkdir(parents=True)
             result = run(
                 RENDER,
                 "--cwd",

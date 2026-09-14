@@ -31,58 +31,64 @@ allowed-tools:
 
 # /promise
 
-`outcome-framework.md`, beside this file, is the contract for the doc — the
-template, the section rules, the lifecycle, and the review rubric. When this
+`outcome-framework.md`, beside this file, is the contract for the doc — section
+rules, lifecycle, review rubric; `templates/outcome-doc.md` is the skeleton. When this
 skill and the framework disagree, the framework wins. This skill produces the
 doc up to `draft` and carries out the transitions a human calls for after
 that; it never implements the capability the doc describes.
 
 Where the project configures a capability map, the map becomes the source of
-the doc's scenarios from the moment a human marks the doc `agreed` — the
-doc's acceptance rows are filed there as rows, and `intake`/`reconcile` read
-and write the map, not a second copy inside the doc. No map configured →
-the doc stays the only home, always.
+the doc's scenarios from the moment `arm` runs on a doc a human has marked
+`agreed` — the doc's acceptance rows are filed there as rows, and
+`intake`/`reconcile` read and write the map, not a second copy inside the doc.
+No map configured → the doc stays the only home, always.
 
 ## Other hosts
 
-This file follows the shared SKILL.md standard, so Codex and Cursor read it too. Three
+This file follows the shared SKILL.md standard, so Codex and Cursor read it too. Two
 things below are Claude Code notation, which Claude expands at load time and other hosts
 show literally; translate them there: the CLAUDE_SKILL_DIR variable is the directory
-containing this file; the ARGUMENTS variable is the user's whole message; a line that
-starts with an exclamation mark and a backtick is a command the host runs at load time —
-if it did not run, run that command by hand as the first action.
+containing this file; a line that starts with an exclamation mark and a backtick is a
+command the host runs at load time — if it did not run, run that command by hand as the
+first action.
 
 ## Phase 0 — orient
 
-!`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py"`
+!`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" 2>&1 || true`
 
 If the block above is empty or shows an error, run that exact command by
 hand before anything else — every mode below depends on its JSON. If
-`python3` itself is missing, say so, name the one-line install for the host
-(`winget install Python.Python.3.12` on Windows, `xcode-select --install` on
-macOS, the distribution's package on Linux), and continue: every check a
-script performs is also written as a rule in the mode files and the
-framework, so it can be applied by hand for this run. Never substitute a
-second implementation of a script.
+`python3` itself is missing, retry the same command once with `python`
+(Windows installs often ship only `python.exe`; `py -3` is the third
+spelling) and use that spelling for every script this run. If none runs,
+say so, name the one-line install for the host (`winget install
+Python.Python.3.12` on Windows, `xcode-select --install` on macOS, the
+distribution's package on Linux), and continue: every check a script
+performs is also written as a rule in the mode files and the framework, so
+it can be applied by hand for this run. Never substitute a second implementation.
 
-The block above deliberately carries no part of the user's message: a message
-with a quote in it would break a shell line, and user text is never composed
-into a command. For the deterministic mode hint, write the message to a
-scratch file with the Write tool, then run
-`python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" --input-file <that file>`
-and read `suggestedMode`, `signals[]` and `ambiguous`. Treat them as a hint:
-the Modes section below decides, and says so.
+The block above deliberately carries no part of the user's message: a message with
+a quote in it would break a shell line, and user text is never composed into a
+command. For the deterministic mode hint, write the message to a scratch file with
+the Write tool, run `python3 "${CLAUDE_SKILL_DIR}/scripts/orient.py" --input-file
+<that file>`, and read `suggestedMode`, `signals[]` and `ambiguous`. Treat them as
+a hint: the Modes section below decides, and says so. The same rule holds for every
+later hop: a feedback item or a query reaches `adapter.py find` through
+`--query-file` and `outcome_rows.py --search` through `--search-file`, never on the
+command line.
 
 State, in one line, what Phase 0 resolved: mode (and that it was inferred,
 if it was), framework source, docs home and its source, whether a map is
-configured, and whether the project is adopted.
+configured (orient's `mapUsable`), and whether the project is adopted.
 
 Configured commands never run as composed shell strings. Every `map.find`,
 `map.row`, `map.nextId`, `map.checks` and verify command runs through
 `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py"`, which passes the user's
-text as one argument. When a map is configured, print
-`adapter.py show` once per session so the person sees exactly which
-repository-supplied commands this skill will run before any of them runs.
+text as one argument. Those commands come from the project's own config and
+run as you, like a `package.json` script. Before the first one runs in a
+session, print `adapter.py show` and ask — **(Recommended)** run them, one
+reason — and run nothing configured until the yes; on no, continue as if no
+map and no `commands` were configured, and say so in the Phase 0 line.
 
 `adopted: false` → offer `adopt` once per session, **(Recommended)**, with
 one reason: every agent and person in the repo gets routed here instead of
@@ -92,13 +98,12 @@ whether or not they take it.
 ## Modes
 
 The user types `/promise` and says what they want, in plain words. A leading
-mode word is a shortcut, never a requirement — people will not remember
-eight mode names and must not have to. Read the input and Phase 0's
+mode word is a shortcut, never a requirement. Read the input and Phase 0's
 findings, name the mode inferred in one line ("Reading this as
 **reconcile** — you named a PR"), and proceed. Never answer "use
 `/promise <mode>`", never refuse for syntax, and ask only when two modes are
 genuinely plausible — then as one question with a **(Recommended)** option
-first, one reason, and a completeness score per option.
+first and one reason.
 
 | Mode | Mode file | The input looks like… |
 |---|---|---|
@@ -127,8 +132,7 @@ prints them from the resolved framework; `--list` shows every section.
 ## Rules that hold in every mode
 
 - Every decision put to the user is one option marked **(Recommended)**
-  first, with one concrete reason and a 1–10 completeness score per option —
-  never a silent pick.
+  first, with one concrete reason — never a silent pick.
 - The user's edit enters the doc, not the candidate it started from.
 - Verify before believing: a current-state claim carries `file:line` read
   this run, not remembered from an earlier one.

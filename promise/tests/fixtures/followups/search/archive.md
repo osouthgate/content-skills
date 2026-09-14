@@ -19,7 +19,7 @@ Contents: [0. TLDR](#0-tldr) · [1. Problem](#1-problem) · [2. Outcome](#2-outc
 - Archiving never deletes messages.  → AT-2
 **How we'll know:** Priya archives a quiet channel and it drops out of her
 sidebar within a minute, with its history still searchable.
-**Scenarios:** 2 acceptance rows (§6), 1 worked examples (§3).
+**Scenarios:** 2 acceptance rows (§6), 1 worked example (§3).
 
 Agent notes (appended, numbered — never edited into the block above; they sit
 under §0 but do NOT count toward its 40-line budget):
@@ -67,10 +67,10 @@ channel reads as archived in the sidebar but still accepts messages.
 
 ## 6. Acceptance
 
-| #    | Given | When | Then |
-|------|-------|------|------|
-| AT-1 | Priya is in a channel | she archives it | the channel becomes read-only and leaves the sidebar |
-| AT-2 | a channel is archived | Ana searches for an old message in it | the message still appears in search results |
+| #    | Given | When | Then | Altitude |
+|------|-------|------|------|----------|
+| AT-1 | Priya is in a channel | she archives it | the channel becomes read-only and leaves the sidebar | perception |
+| AT-2 | a channel is archived | Ana searches for an old message in it | the message still appears in search results | perception |
 Why — what breaks without it: without a table, "acceptance" is a claim with
 nothing to point at.
 

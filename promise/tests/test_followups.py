@@ -1,8 +1,8 @@
 """Tests for three follow-up features on top of the promise skill's scripts:
 
-  * orient.py --input          -- a suggestedMode/signals router hint (architecture.md SS4)
+  * orient.py --input          -- a suggestedMode/signals router hint (architecture.md §4)
   * outcome_rows.py --write-counts -- corrects a doc's Scenarios: line in place
-  * outcome_rows.py --search       -- ranks SS6 rows and SS0 rules by token overlap
+  * outcome_rows.py --search       -- ranks §6 rows and §0 rules by token overlap
 
 Run from the repo root:
 
@@ -14,7 +14,7 @@ script is exercised as a real subprocess (argv, stdout, stderr, exit code).
 A scenario that needs its own project (particular docs, a particular config)
 is built in a temporary directory rather than checked in, so each rule's
 precondition is exact and visible in the test itself; the --search fixtures,
-which need realistic SS6/SS0 prose to score against, are checked in under
+which need realistic §6/§0 prose to score against, are checked in under
 fixtures/followups/search/.
 """
 
@@ -56,7 +56,7 @@ def orient_with_input(cwd: str, input_text: Optional[str]) -> Dict[str, Any]:
 
 
 def write_doc(dir_path: Path, filename: str, title: str, status: str) -> Path:
-    """A doc with just enough shape for orient.py's existingDocs scan: a SS0
+    """A doc with just enough shape for orient.py's existingDocs scan: a §0
     TLDR heading (so it is picked up at all), an H1 title and a Status:
     line. Nothing here calls lint_outcome.py, so the doc need not carry
     the framework's full eleven sections."""
@@ -91,7 +91,7 @@ def make_project(
 ) -> None:
     """A temp project: docs/designs/<file> per `docs` ({"filename", "title",
     "status"}), plus a .claude/promise.config.json naming docsHome and,
-    when given, a map.rowIdPattern (architecture.md SS6/SS4 rule 7)."""
+    when given, a map.rowIdPattern (architecture.md §6/§4 rule 7)."""
     docs_home = Path(tmp_dir) / "docs" / "designs"
     docs_home.mkdir(parents=True, exist_ok=True)
     for d in docs:
@@ -126,7 +126,7 @@ class SuggestModeAbsentFlagTests(unittest.TestCase):
 
 
 class SuggestModeRuleTests(unittest.TestCase):
-    """One test per architecture.md SS4 rule (FEATURE 1), rules 1-10 in order."""
+    """One test per architecture.md §4 rule (FEATURE 1), rules 1-10 in order."""
 
     def test_rule1_first_word_is_a_mode_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,7 +236,7 @@ class SuggestModeRuleTests(unittest.TestCase):
 
 class SuggestModeTableRegressionTests(unittest.TestCase):
     """One assertion per example phrase in SKILL.md's Modes table (the
-    same table architecture.md SS4 carries), with the minimal
+    same table architecture.md §4 carries), with the minimal
     existingDocs/config context each phrase's own row describes it
     needing. Four of these were misses, fixed alongside this test: a
     generic change verb aimed at an unnamed doc, a critique verb with no
@@ -628,6 +628,37 @@ class WriteCountsTests(unittest.TestCase):
         self.assertIn("Scenarios", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_one_worked_example_is_written_in_the_singular(self) -> None:
+        # digest.md has two rows and one ### example; a template-shaped
+        # "1 worked examples" is corrected to "1 worked example", and the
+        # rest of the line — the (§6)/(§3) citations, the full stop — is
+        # copied through unchanged.
+        digest = (FOLLOWUPS_DIR / "search" / "digest.md").read_text(encoding="utf-8")
+        self.assertIn("**Scenarios:** 2 acceptance rows (§6), 1 worked example (§3).", digest)
+        wrong = digest.replace("1 worked example (§3)", "1 worked examples (§3)")
+        self.assertNotEqual(wrong, digest)
+        path = self._write("digest.md", wrong)
+        result = run(ROWS, str(path), "--write-counts")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("**Scenarios:** 2 acceptance rows (§6), 1 worked example (§3).", after)
+        self.assertNotIn("1 worked examples", after)
+        self.assertEqual(after, digest)
+
+    def test_several_worked_examples_stay_plural(self) -> None:
+        # conforming.md has two ### examples; a hand-written singular is
+        # corrected back to the plural along with the count.
+        wrong = self.conforming_text.replace(
+            "**Scenarios:** 3 acceptance rows (§6), 2 worked examples (§3).",
+            "**Scenarios:** 3 acceptance rows (§6), 1 worked example (§3).",
+        )
+        self.assertNotEqual(wrong, self.conforming_text)
+        path = self._write("singular.md", wrong)
+        result = run(ROWS, str(path), "--write-counts")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("**Scenarios:** 3 acceptance rows (§6), 2 worked examples (§3).", after)
+
     def test_crlf_file_keeps_crlf(self) -> None:
         wrong = self.conforming_text.replace(
             "**Scenarios:** 3 acceptance rows (§6), 2 worked examples (§3).",
@@ -687,6 +718,48 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(set(entry.keys()), {"doc", "kind", "id", "score", "text"})
             self.assertIn(entry["kind"], ("row", "rule"))
 
+    def test_docs_in_an_immediate_subdirectory_are_searched_like_lint_walks_them(self) -> None:
+        # lint_outcome.py's directory mode walks the folder plus its
+        # immediate subdirectories; --search scans the same depth, so a
+        # docs home laid out as docs/designs/<area>/<doc>.md is found by
+        # both — and a doc two levels down by neither.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "notifications").mkdir()
+            (root / "notifications" / "deep").mkdir()
+            digest = (FOLLOWUPS_DIR / "search" / "digest.md").read_text(encoding="utf-8")
+            (root / "notifications" / "digest.md").write_text(digest, encoding="utf-8")
+            (root / "notifications" / "deep" / "digest-too-deep.md").write_text(digest, encoding="utf-8")
+            result = run(ROWS, "--search", "daily digest email morning", "--dir", str(root), "--json")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            docs = {entry["doc"] for entry in json.loads(result.stdout)}
+            self.assertEqual(docs, {str(root / "notifications" / "digest.md")})
+
+    def test_dir_that_does_not_exist_is_exit_2_not_no_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = str(Path(tmp) / "nope")
+            result = run(ROWS, "--search", "daily digest", "--dir", missing)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("--dir", result.stderr)
+            self.assertIn("nope", result.stderr)
+
+    def test_dir_that_is_a_file_is_exit_2(self) -> None:
+        result = run(ROWS, "--search", "daily digest", "--dir", str(FOLLOWUPS_DIR / "search" / "digest.md"))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("not a directory", result.stderr)
+
+    def test_non_utf8_doc_in_the_folder_is_skipped_not_a_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            digest = (FOLLOWUPS_DIR / "search" / "digest.md").read_text(encoding="utf-8")
+            (root / "digest.md").write_text(digest, encoding="utf-8")
+            (root / "bad.md").write_bytes(b"## 0. TLDR\n\xff\xfe\x00")
+            result = run(ROWS, "--search", "daily digest email morning", "--dir", str(root), "--json")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertTrue(json.loads(result.stdout))
+
     def test_top_8_cap_and_ordering_is_stable_across_both_docs(self) -> None:
         result = run(ROWS, "--search", "archived channel digest", "--dir", self.search_dir, "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -694,6 +767,181 @@ class SearchTests(unittest.TestCase):
         self.assertLessEqual(len(data), 8)
         scores = [entry["score"] for entry in data]
         self.assertEqual(scores, sorted(scores, reverse=True))
+
+
+class SearchFileTests(unittest.TestCase):
+    """``--search-file`` reads the query from a file (or stdin), so a
+    verbatim feedback item never has to appear on a command line. The
+    payload here is the same shape test_adapter_render.py uses: a quote
+    that would close a shell argument early, then a command that WOULD
+    create a marker file if a shell ever ran it."""
+
+    def setUp(self) -> None:
+        self.search_dir = str(FOLLOWUPS_DIR / "search")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.marker = self.tmp / "PWNED"
+        self.hostile = f'daily digest email morning"; touch {self.marker}; echo "'
+        self.query_file = self.tmp / "item.txt"
+
+    def test_payload_is_a_genuine_positive_control(self) -> None:
+        self.assertFalse(self.marker.exists())
+        subprocess.run(f'true "{self.hostile}"', shell=True)
+        self.assertTrue(self.marker.exists(), "the payload must be able to create the marker under a real shell")
+
+    def test_hostile_query_from_file_ranks_normally_and_runs_nothing(self) -> None:
+        self.query_file.write_text(self.hostile + "\n", encoding="utf-8")
+        result = run(ROWS, "--search-file", str(self.query_file), "--dir", self.search_dir, "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertTrue(data)
+        self.assertIn("digest.md", data[0]["doc"])
+        self.assertEqual(data[0]["id"], "AT-1")
+        self.assertFalse(self.marker.exists(), "a query read from a file must never reach a shell")
+
+    def test_file_and_inline_forms_rank_the_same_query_identically(self) -> None:
+        self.query_file.write_text("daily digest email morning\n", encoding="utf-8")
+        inline = run(ROWS, "--search", "daily digest email morning", "--dir", self.search_dir, "--json")
+        from_file = run(ROWS, "--search-file", str(self.query_file), "--dir", self.search_dir, "--json")
+        self.assertEqual(from_file.returncode, 0, from_file.stderr)
+        self.assertEqual(json.loads(inline.stdout), json.loads(from_file.stdout))
+
+    def test_an_interior_crlf_is_kept_and_ranks_like_the_lf_form(self) -> None:
+        # newline="" in the reader: a CRLF interior is not rewritten, and the
+        # tokeniser splits on either terminator, so the ranking is the same.
+        self.query_file.write_bytes(b"daily digest\r\nemail morning\r\n")
+        from_crlf = run(ROWS, "--search-file", str(self.query_file), "--dir", self.search_dir, "--json")
+        self.assertEqual(from_crlf.returncode, 0, from_crlf.stdout + from_crlf.stderr)
+        self.query_file.write_bytes(b"daily digest\nemail morning\n")
+        from_lf = run(ROWS, "--search-file", str(self.query_file), "--dir", self.search_dir, "--json")
+        self.assertEqual(json.loads(from_crlf.stdout), json.loads(from_lf.stdout))
+        self.assertIn("digest.md", json.loads(from_crlf.stdout)[0]["doc"])
+
+    def test_stdin_dash_reads_the_query_from_stdin(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROWS), "--search-file", "-", "--dir", self.search_dir, "--json"],
+            input=self.hostile + "\n",
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("digest.md", json.loads(result.stdout)[0]["doc"])
+        self.assertFalse(self.marker.exists())
+
+    def test_missing_search_file_is_exit_2(self) -> None:
+        result = run(ROWS, "--search-file", str(self.query_file), "--dir", self.search_dir)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("--search-file", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_search_and_search_file_together_is_exit_2(self) -> None:
+        self.query_file.write_text("x", encoding="utf-8")
+        result = run(ROWS, "--search", "x", "--search-file", str(self.query_file), "--dir", self.search_dir)
+        self.assertEqual(result.returncode, 2)
+
+    def test_search_file_requires_dir_too(self) -> None:
+        self.query_file.write_text("x", encoding="utf-8")
+        result = run(ROWS, "--search-file", str(self.query_file))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--dir", result.stderr)
+
+
+class AltitudeFieldTests(unittest.TestCase):
+    """Every row carries "altitude": the §6 table's Altitude cell, or null
+    when the table has no such column or the cell is empty."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+        self.conforming_text = (FIXTURES_DIR / "conforming.md").read_text(encoding="utf-8")
+
+    def _rows_of(self, text: str) -> List[Dict[str, Any]]:
+        path = self.dir / "doc.md"
+        path.write_text(text, encoding="utf-8")
+        result = run(ROWS, str(path), "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["rows"]
+
+    def _with_altitude_column(self, values: Optional[List[str]]) -> str:
+        """conforming.md with its §6 Altitude column set to `values` (one
+        per AT row, "" for an empty cell), or removed when `values` is
+        None — whatever shape the checked-in fixture carries today."""
+        lines = self.conforming_text.splitlines()
+        out = []
+        idx: Optional[int] = None
+        data_i = 0
+        for line in lines:
+            cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.startswith("|") else None
+            if cells and cells[0] == "#":
+                idx = cells.index("Altitude") if "Altitude" in cells else None
+                if values is None:
+                    if idx is not None:
+                        del cells[idx]
+                elif idx is None:
+                    cells.append("Altitude")
+                    idx = len(cells) - 1
+                out.append("| " + " | ".join(cells) + " |")
+            elif cells and cells[0].startswith("-") and idx is not None or (cells and cells[0].startswith("-") and values is not None):
+                sep = cells
+                if values is None:
+                    if idx is not None and idx < len(sep):
+                        del sep[idx]
+                elif idx is not None and idx >= len(sep):
+                    sep.append("----")
+                out.append("|" + "|".join(sep) + "|")
+            elif cells and cells[0].startswith("AT-"):
+                if values is None:
+                    if idx is not None and idx < len(cells):
+                        del cells[idx]
+                else:
+                    value = values[data_i]
+                    if idx is not None and idx < len(cells):
+                        cells[idx] = value
+                    else:
+                        cells.append(value)
+                    data_i += 1
+                out.append("| " + " | ".join(cells) + " |")
+            else:
+                out.append(line)
+        return "\n".join(out) + "\n"
+
+    def test_key_is_present_and_null_without_an_altitude_column(self) -> None:
+        text = self._with_altitude_column(None)
+        self.assertNotIn("Altitude", text)
+        rows = self._rows_of(text)
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertIn("altitude", row)
+            self.assertIsNone(row["altitude"])
+
+    def test_altitude_cell_is_read_by_header_name(self) -> None:
+        text = self._with_altitude_column(["response", "perception", ""])
+        self.assertIn("| Altitude |", text)
+        rows = self._rows_of(text)
+        self.assertEqual([r["id"] for r in rows], ["AT-1", "AT-2", "AT-3"])
+        self.assertEqual([r["altitude"] for r in rows], ["response", "perception", None])
+
+    def test_altitude_appears_in_the_human_output(self) -> None:
+        path = self.dir / "doc.md"
+        path.write_text(self._with_altitude_column(["data", "data", "sibling"]), encoding="utf-8")
+        result = run(ROWS, str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("sibling", result.stdout)
+
+
+class NonUtf8DocTests(unittest.TestCase):
+    def test_non_utf8_doc_is_a_refusal_not_a_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.md"
+            bad.write_bytes(b"\xff\xfe\x00Status: draft\x00")
+            result = run(ROWS, str(bad), "--json")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("cannot read", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -712,6 +960,7 @@ class HelpDocumentsNewFlagsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("--write-counts", result.stdout)
         self.assertIn("--search", result.stdout)
+        self.assertIn("--search-file", result.stdout)
         self.assertIn("--dir", result.stdout)
 
 

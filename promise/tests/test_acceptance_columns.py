@@ -4,22 +4,23 @@ Run from the repo root:
 
     python3 -m unittest discover -s promise/tests -v
 
-A real doc's SS6 header is not guaranteed to be exactly `# | Given | When |
+A real doc's §6 header is not guaranteed to be exactly `# | Given | When |
 Then | Row`: an extra column (a `Label`) can sit anywhere, and `Row` can
 appear in any position, or not at all. `lint_outcome.parse_acceptance_rows`
 maps every column by its header text (case-insensitive, trimmed) through
 `acceptance_column_map`, and `find_acceptance_tables`/`check_acceptance_table`
 (the ACCEPTANCE_TABLE rule) use the same map to decide whether a table
 qualifies at all — Given, When and Then must each appear by name, each
-exactly once; Row is optional (and, if present, must also appear exactly
-once) and, absent, every row's `row` reads as None rather than as whatever
-cell happens to sit at the old fixed position. A header naming one of
-Given/When/Then/Row more than once never guesses which occurrence is "the"
-column either — it does not qualify at all, the same as a header missing
-one of them.
+exactly once; Altitude and Row are optional (and, if present, must each
+appear exactly once) and, absent, every row's `altitude`/`row` reads as
+None rather than as whatever cell happens to sit at the old fixed position
+(an absent Altitude column is also an ALTITUDE_MISSING warning). A header
+naming one of Given/When/Then/Altitude/Row more than once never guesses
+which occurrence is "the" column either — it does not qualify at all, the
+same as a header missing one of them.
 
 Fixtures live under fixtures/acceptance-columns/, each conforming.md with
-one change to SS6's table shape (and, for the `_agreed` variant, the status
+one change to §6's table shape (and, for the `_agreed` variant, the status
 and rule tags a bridged doc needs). test_lint_hardening.py and test_scripts.py
 cover the pre-existing fixtures (a header that already names Given/When/Then
 in the template's own order) and must keep passing unchanged — this module
@@ -54,6 +55,7 @@ ROW_SECOND = FIXTURES_DIR / "row_second_column.md"
 HEADER_MISSING_THEN = FIXTURES_DIR / "header_missing_then.md"
 DUPLICATE_THEN = FIXTURES_DIR / "duplicate_then_column.md"
 DUPLICATE_ROW = FIXTURES_DIR / "duplicate_row_column.md"
+DUPLICATE_ALTITUDE = FIXTURES_DIR / "duplicate_altitude_column.md"
 MIXED_VALID_AND_MALFORMED = FIXTURES_DIR / "mixed_valid_and_malformed_table.md"
 
 
@@ -79,15 +81,17 @@ class FixturesExistTests(unittest.TestCase):
     def test_every_fixture_exists(self) -> None:
         for path in (
             LABEL_NO_ROW, LABEL_NO_ROW_AGREED, ROW_SECOND, HEADER_MISSING_THEN,
-            DUPLICATE_THEN, DUPLICATE_ROW, MIXED_VALID_AND_MALFORMED,
+            DUPLICATE_THEN, DUPLICATE_ROW, DUPLICATE_ALTITUDE, MIXED_VALID_AND_MALFORMED,
         ):
             self.assertTrue(path.is_file(), f"missing fixture: {path}")
 
     def test_each_new_fixture_is_conforming_plus_one_table_change(self) -> None:
         conforming_lines = CONFORMING.read_text(encoding="utf-8").splitlines()
-        for path in (LABEL_NO_ROW, ROW_SECOND, HEADER_MISSING_THEN, DUPLICATE_THEN, DUPLICATE_ROW):
+        for path in (
+            LABEL_NO_ROW, ROW_SECOND, HEADER_MISSING_THEN, DUPLICATE_THEN, DUPLICATE_ROW, DUPLICATE_ALTITUDE,
+        ):
             lines = path.read_text(encoding="utf-8").splitlines()
-            # Same line count: only the SS6 table's own lines were rewritten
+            # Same line count: only the §6 table's own lines were rewritten
             # (a straight header+row replacement), nothing inserted or removed.
             self.assertEqual(len(lines), len(conforming_lines), path.name)
 
@@ -120,19 +124,27 @@ class LabelColumnNoRowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for r in data["rows"]:
             self.assertIsNone(r["row"], r)
+            # Altitude sits after the Label column shifted everything: still
+            # read by name.
+            self.assertEqual(r["altitude"], "perception", r)
 
     def test_bridge_validate_reports_row_missing_not_row_id_format(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
+            # A USABLE map (orient's mapUsable: recipe, find, row and lanes
+            # all present) — bridge_validate refuses an incomplete one with
+            # MAP_NOT_CONFIGURED before it reads any row.
             write_config(
                 project,
                 {
+                    "version": 1,
                     "map": {
                         "recipe": "docs/how-to/adding-a-row.md",
                         "find": fixture_command(FAKE_ROW),
                         "row": fixture_command(FAKE_ROW),
+                        "lanes": {"data": "tests[]"},
                         "rowIdPattern": r"^R\d+$",
-                    }
+                    },
                 },
             )
             result, data = run_json(
@@ -166,6 +178,7 @@ class RowSecondColumnTests(unittest.TestCase):
         self.assertEqual(by_id["AT-1"]["given"], "Ana is in a channel")
         self.assertEqual(by_id["AT-1"]["when"], "she mutes it")
         self.assertEqual(by_id["AT-1"]["then"], "she gets no push or badge from it")
+        self.assertEqual(by_id["AT-1"]["altitude"], "perception")
 
 
 class HeaderMissingThenTests(unittest.TestCase):
@@ -222,6 +235,19 @@ class DuplicateColumnNameTests(unittest.TestCase):
         for r in data["rows"]:
             self.assertIsNone(r["row"], r)
 
+    def test_duplicate_altitude_column_fires_acceptance_table_alone(self) -> None:
+        result, data = run_json(LINT, str(DUPLICATE_ALTITUDE), "--json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual([(f["rule"], f["severity"]) for f in data["findings"]], [("ACCEPTANCE_TABLE", "error")])
+
+    def test_duplicate_altitude_column_never_guesses_an_altitude(self) -> None:
+        result, data = run_json(ROWS, str(DUPLICATE_ALTITUDE), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(data["rows"]), 3)
+        for r in data["rows"]:
+            self.assertIsNone(r["altitude"], r)
+            self.assertIsNone(r["row"], r)
+
 
 class MixedValidAndMalformedTableTests(unittest.TestCase):
     """A malformed acceptance-shaped table beside a VALID one used to be
@@ -257,6 +283,7 @@ class MixedValidAndMalformedTableTests(unittest.TestCase):
         by_id = {r["id"]: r for r in data["rows"]}
         self.assertIn("AT-4", by_id)
         self.assertIsNone(by_id["AT-4"]["row"])
+        self.assertIsNone(by_id["AT-4"]["altitude"])
         self.assertEqual(by_id["AT-4"]["given"], "")
         self.assertEqual(by_id["AT-4"]["when"], "")
         self.assertEqual(by_id["AT-4"]["then"], "")
@@ -288,7 +315,7 @@ class RegressionGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_template_row_column_still_reads_by_name(self) -> None:
-        # The template's own SS6 header is `# | Given | When | Then | Row`
+        # The template's own §6 header is `# | Given | When | Then | Altitude | Row`
         # (architecture.md's canonical shape) -- confirms the Row-by-name
         # path still recognises the template's own column, empty as it is.
         result, data = run_json(ROWS, str(TEMPLATE), "--json")

@@ -180,10 +180,10 @@ def collect_status_transition_sentences() -> Dict[str, List[str]]:
 
 STATUS_TRANSITION_ALLOWLIST: Dict[str, str] = {
     "Where the project configures a capability map, the map becomes the "
-    "source of the doc's scenarios from the moment a human marks the doc "
-    "`agreed` — the doc's acceptance rows are filed there as rows, and "
-    "`intake`/`reconcile` read and write the map, not a second copy inside "
-    "the doc.": "describes-the-human-act",
+    "source of the doc's scenarios from the moment `arm` runs on a doc a "
+    "human has marked `agreed` — the doc's acceptance rows are filed there "
+    "as rows, and `intake`/`reconcile` read and write the map, not a second "
+    "copy inside the doc.": "describes-the-human-act",
 
     '| `arm` | `modes/arm.md` | an `agreed` doc plus "start building", '
     '"arm it", "write the red tests", "file the rows", "kick off the '
@@ -196,7 +196,8 @@ STATUS_TRANSITION_ALLOWLIST: Dict[str, str] = {
     "`agreed`.": "negated",
 
     "Write the new row id into the `Row` column of each §6 line it "
-    "covers, and add one line under the §6 table: `Snapshot taken at "
+    "covers, adding the column between `Altitude` and the table's edge if "
+    "the doc has none, and add one line under the §6 table: `Snapshot taken at "
     "`agreed` on <date>; the map is the source of these scenarios from "
     "here on.` §0's rule tags stay AT aliases; they do not change.":
         "not-a-transition",
@@ -229,11 +230,12 @@ STATUS_TRANSITION_ALLOWLIST: Dict[str, str] = {
     "through `/promise` in plain words (the mode is inferred); one doc "
     "per capability in the docs home, in the Outcome Framework shape; §0 "
     "is the human's verbatim block and agents only append notes below "
-    "it; `Status:` moves forward only by a human; where a map is "
-    "configured it is the source of scenarios after `agreed` and a "
-    "verdict moves only at the altitude the row's own `Then` claims; "
-    "before writing any design, plan or spec doc by hand, run `/promise` "
-    "— a sibling doc is a bug.": "human-actor",
+    "it; `Status:` reaches `agreed` and `shipped` only by a human's hand, "
+    "`building` only after the human approves the red-test commit; where a "
+    "map is configured it is the source of scenarios after `agreed`, §6 is "
+    "then a snapshot nobody edits, and a verdict moves only at the altitude "
+    "the row's own `Then` claims; before writing any design, plan or spec "
+    "doc by hand, run `/promise` — a sibling doc is a bug.": "human-actor",
 
     "No mode file restates a project's mechanics; each says \"read the "
     "recipe, work from the file.\" Look in the recipe for the parts a "
@@ -267,6 +269,45 @@ class ArmWritesOnlyBuilding(unittest.TestCase):
             text,
             "arm.md must say `building` is the only status this skill writes",
         )
+
+
+class ArmCommitsTheDoc(unittest.TestCase):
+    """The doc edits arm makes (§6 output, the `Red gate:` line, `Status:`)
+    reach git as the branch's second commit, after the test-only first one."""
+
+    def test_arm_names_the_doc_commit(self) -> None:
+        text = normalize_whitespace(ARM_MD.read_text(encoding="utf-8"))
+        self.assertIn("docs(<scope>): arm", text)
+        self.assertIn("test(<scope>): red acceptance gate", text)
+        self.assertIn("both commit shas", text)
+
+
+MERGE_MD = SKILL / "modes" / "merge.md"
+
+
+class MergeNamesItsMechanics(unittest.TestCase):
+    """merge is the one mode that deletes files and the one mode that writes
+    `superseded-by`; each mechanic must be stated, not left to the model."""
+
+    def test_deletion_is_git_rm_by_explicit_path(self) -> None:
+        text = normalize_whitespace(MERGE_MD.read_text(encoding="utf-8"))
+        self.assertIn("`git rm <path>`", text, "the Delete and commit section names the git mechanics")
+        self.assertIn("Never `git rm` a file the user did not name", text)
+
+    def test_a_building_doc_has_its_red_gate_retired(self) -> None:
+        text = normalize_whitespace(MERGE_MD.read_text(encoding="utf-8"))
+        self.assertIn("Red gate", text, "the Folding a building doc section names the Red gate line")
+        self.assertIn("feat/<slug>", text)
+
+    def test_a_bridged_doc_has_its_rows_repointed_or_retired(self) -> None:
+        text = normalize_whitespace(MERGE_MD.read_text(encoding="utf-8"))
+        self.assertIn("**Re-point**", text)
+        self.assertIn("**Retire**", text)
+
+    def test_superseded_by_is_written_only_on_a_kept_folded_doc(self) -> None:
+        text = normalize_whitespace(MERGE_MD.read_text(encoding="utf-8"))
+        self.assertIn("`Status: superseded-by <survivor path>`", text)
+        self.assertIn("the one case any mode writes that status", text)
 
 
 class SkillStatesTheRule(unittest.TestCase):
