@@ -74,11 +74,11 @@ path could forget to honour a mute.
 
 ## 6. Acceptance
 
-| #    | Given | When | Then | Row |
-|------|-------|------|------|-----|
-| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | R1 |
-| AT-2 | Ana has muted a channel | she unmutes it | notifications resume immediately | R1x |
-| AT-3 | Ana has muted a channel | Ben (unmuted) gets a message in it | Ben is still notified normally | R2 |
+| #    | Given | When | Then | Altitude | Row |
+|------|-------|------|------|----------|-----|
+| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | perception | R1 |
+| AT-2 | Ana has muted a channel | she unmutes it | notifications resume immediately | perception | R1x |
+| AT-3 | Ana has muted a channel | Ben (unmuted) gets a message in it | Ben is still notified normally | perception | R2 |
 
 Snapshot taken at `agreed` on 2026-01-01; the map is the source of these scenarios from here on.
 Why — what breaks without it: without a table, "acceptance" is a claim with
@@ -105,5 +105,7 @@ threads? Not decided yet; ships without thread-level muting.
 
 ## 10. Out of scope
 
-Snoozing (a time-boxed mute) is a separate capability, owned by a future doc.
-Notification digests are owned by the digest doc, not this one.
+Snoozing (a time-boxed mute) is a separate capability, owned by
+[Channel snoozing](channel-snoozing.md); notification digests by
+[Notification digests](notification-digests.md). Neither is written yet, and
+this doc does not wait for either.

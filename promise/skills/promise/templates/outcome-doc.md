@@ -3,6 +3,7 @@
 Status: draft
 Owner: <name>        Last decision: YYYY-MM-DD
 Supersedes: —
+<!-- Red gate: <sha> <YYYY-MM-DD> — arm writes this as its own header line, outside this comment, when Status becomes building -->
 
 Contents: [0. TLDR](#0-tldr) · [1. Problem](#1-problem) · [2. Outcome](#2-outcome) ·
 [3. Worked examples](#3-worked-examples) · [4. Invariants](#4-invariants) ·
@@ -18,15 +19,10 @@ Contents: [0. TLDR](#0-tldr) · [1. Problem](#1-problem) · [2. Outcome](#2-outc
 - <rule — one line, stated as a fact, verbatim>  → AT-1
 - <rule — one line, stated as a fact, verbatim>  → AT-2
 **How we'll know:** <the demoable or measurable signal, decided by a human>
-**Scenarios:** 2 acceptance rows (§6), 1 worked examples (§3).
+**Scenarios:** 2 acceptance rows (§6), 1 worked example (§3).
 
-Exactly two things inside this block are agent-maintained metadata, and an
-agent may edit ONLY these two: the trailing `→ AT-n` / `→ UNTESTED` tag on
-each rule (never the rule text), and the `Scenarios:` counts. Everything
-else — outcome line, rule text, how-we'll-know — is frozen and changes only
-by human confirmation.
-
-Agent notes (appended, numbered — never edited into the block above):
+Agent notes (appended, numbered — never edited into the block above; they
+sit under §0 but do NOT count toward its 40-line budget):
 1. <example note — a gap, contradiction, or question about a rule above>
 
 ## 1. Problem
@@ -47,7 +43,8 @@ outcome line.
 *(human seeds ≥1, agent extends)*
 
 Named actors, concrete state, expected outcome. Cover at minimum: the happy
-path, the disconnect/undo path, the permission-removal path.
+path, the undo/reverse path, and any permission or visibility edge the
+capability has.
 
 **Ana <takes the primary action>.**
 <Ben, under a different condition, gets the expected — and concretely
@@ -71,15 +68,21 @@ Why — what breaks without it: <one line>
 ## 6. Acceptance
 *(agent drafts, human confirms)*
 
-| #    | Given   | When   | Then   | Row |
-|------|---------|--------|--------|-----|
-| AT-1 | <given> | <when> | <then> |     |
-| AT-2 | <given> | <when> | <then> |     |
+| #    | Given   | When   | Then   | Altitude   | Row |
+|------|---------|--------|--------|------------|-----|
+| AT-1 | <given> | <when> | <then> | <altitude> |     |
+| AT-2 | <given> | <when> | <then> | <altitude> |     |
 
 Rows carry stable IDs (AT-1, AT-2, …) so §0 rules can cite them; renumbering
 breaks the §0 tags, so IDs are append-only. Each row maps to a runnable test
-or eval command. The `Row` column is optional: empty until a capability
-map's `agreed` bridge files this scenario, then it holds that row's id.
+or eval command. `Altitude` is one of `data` / `response` / `perception` /
+`judgement` / `sibling` (references/altitude.md) — what the `Then` asserts
+on; it is what `reconcile` compares evidence against. The `Row` column stays
+empty until a capability map's `agreed` bridge files this scenario; then it
+holds that row's id, and one line goes directly under the table, reading
+exactly `` Snapshot taken at `agreed` on <YYYY-MM-DD>; the map is the source of
+these scenarios from here on. `` — `bridge_validate.py` errors on a bridged
+doc without it. Do not add that line before the bridge.
 Why — what breaks without it: <one line>
 
 ## 7. Build phases

@@ -17,6 +17,7 @@ Contents: [0. TLDR](#0-tldr) · [1. Problem](#1-problem) · [2. Outcome](#2-outc
 **Rules:**
 - A muted channel never sends a push or a badge count until it is unmuted.  → UNTESTED
 - Muting is per member; it never changes what other members see.  → UNTESTED
+- Mute state survives sign-out and a new device.  → UNTESTED
 **How we'll know:** Ana mutes a busy channel and gets zero notifications from it
 for a day, then unmutes and notifications resume.
 **Scenarios:** 0 acceptance rows (§6), 2 worked examples (§3).
@@ -99,5 +100,7 @@ threads? Not decided yet; ships without thread-level muting.
 
 ## 10. Out of scope
 
-Snoozing (a time-boxed mute) is a separate capability, owned by a future doc.
-Notification digests are owned by the digest doc, not this one.
+Snoozing (a time-boxed mute) is a separate capability, owned by
+[Channel snoozing](channel-snoozing.md); notification digests by
+[Notification digests](notification-digests.md). Neither is written yet, and
+this doc does not wait for either.

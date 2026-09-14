@@ -13,6 +13,9 @@ fixtures/lint-hardening/, each the conforming doc with exactly one change
 (occasionally a second, mechanically-forced change — a tag or a count —
 where leaving it out would trip a pre-existing, unrelated rule instead of
 the one under test; see the ACCEPTANCE_TABLE "missing"/"no rows" fixtures).
+The conforming doc's §6 table carries an Altitude column and its §0 three
+rules (the third genuinely UNTESTED), so a fixture at agreed/building drops
+that third rule rather than retagging it.
 """
 
 from __future__ import annotations
@@ -32,7 +35,9 @@ HARDENING_DIR = FIXTURES_DIR / "lint-hardening"
 SCRIPTS_DIR = TESTS_DIR.parent / "skills" / "promise" / "scripts"
 
 LINT = SCRIPTS_DIR / "lint_outcome.py"
+ROWS = SCRIPTS_DIR / "outcome_rows.py"
 TEMPLATE = SCRIPTS_DIR.parent / "templates" / "outcome-doc.md"
+RENDER = SCRIPTS_DIR / "render_outcome.py"
 
 # Every new-rule-hardening fixture, and the single error rule it must trip
 # alone. Each is the conforming doc with exactly one change (see module
@@ -40,6 +45,7 @@ TEMPLATE = SCRIPTS_DIR.parent / "templates" / "outcome-doc.md"
 NEW_FIXTURES = {
     "tldr_fields_empty_outcome.md": "TLDR_FIELDS",
     "tldr_fields_empty_how_we_know.md": "TLDR_FIELDS",
+    "tldr_fields_missing_how_we_know.md": "TLDR_FIELDS",
     "rules_format_stray_line.md": "RULES_FORMAT",
     "rules_format_bullet_no_text.md": "RULES_FORMAT",
     "acceptance_table_missing.md": "ACCEPTANCE_TABLE",
@@ -47,15 +53,40 @@ NEW_FIXTURES = {
     "acceptance_table_empty_cell.md": "ACCEPTANCE_TABLE",
     "acceptance_table_wrong_cell_count.md": "ACCEPTANCE_TABLE",
     "acceptance_table_bad_header_width.md": "ACCEPTANCE_TABLE",
+    "acceptance_table_row_missing_pipe.md": "ACCEPTANCE_TABLE",
+    "acceptance_altitude_empty_cell.md": "ACCEPTANCE_ALTITUDE",
     "headings_bare_duplicate_masked.md": "HEADINGS_BARE",
+    "why_line_empty_value.md": "WHY_LINE",
     "placeholder_angle_in_tldr.md": "PLACEHOLDER",
     "placeholder_angle_in_header_owner.md": "PLACEHOLDER",
     "placeholder_yyyy_mm_dd_in_header.md": "PLACEHOLDER",
     "placeholder_angle_in_acceptance_cell.md": "PLACEHOLDER",
+    "placeholder_angle_in_agent_note.md": "PLACEHOLDER",
+    "placeholder_angle_in_s3_example.md": "PLACEHOLDER",
+    "placeholder_angle_in_s9_owner.md": "PLACEHOLDER",
+    "placeholder_angle_in_why_line.md": "PLACEHOLDER",
     "header_owner_empty_owner.md": "HEADER_OWNER",
     "header_owner_empty_last_decision.md": "HEADER_OWNER",
     "header_status_superseded_no_target.md": "HEADER_STATUS",
+    "fence_unclosed.md": "FENCE_UNCLOSED",
 }
+
+# Fixtures that are conforming.md with one change the lint must TOLERATE:
+# zero findings, exit 0.
+TOLERATED_FIXTURES = (
+    "tldr_fields_curly_apostrophe.md",
+    # A §6 Why line whose prose holds a pipe: a structural line directly
+    # under the table is never read as a row, pipe or not.
+    "why_line_pipe_under_table.md",
+)
+
+# fence_unclosed.md above is conforming.md plus a trailing ```ts line, so
+# FENCE_UNCLOSED fires alone. This one is conforming.md plus a lone ``` line
+# after `## 5. Mechanism`, never closed: HEADINGS_BARE necessarily fires too
+# (every heading after the fence is read as an illustration) — that cascade
+# is the reason the rule exists, so it is pinned by FenceUnclosedTests, not
+# by the one-change harness.
+FENCE_UNCLOSED_CASCADE_FIXTURE = "fence_unclosed_cascade.md"
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -130,6 +161,36 @@ class TldrFieldsEmptyValueTests(unittest.TestCase):
         self.assertFalse(any(f["rule"] == "TLDR_FIELDS" for f in data["findings"]))
 
 
+class HowWeKnowMarkerTests(unittest.TestCase):
+    """The rules block is bounded by the next bold field, the next heading or
+    the end of §0 — never the end of the file — so a missing or mistyped
+    `**How we'll know:**` marker yields one finding about that marker, not a
+    wall of RULES_FORMAT/RULES_TAGGED findings over every later line."""
+
+    def test_curly_apostrophe_is_the_same_marker(self) -> None:
+        # `**How we’ll know:**` (U+2019, what a word processor substitutes)
+        # is tolerated outright: zero findings, and the signal still reads.
+        for filename in TOLERATED_FIXTURES:
+            with self.subTest(fixture=filename):
+                result = run(str(HARDENING_DIR / filename), "--json")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["findings"], [])
+
+    def test_missing_marker_is_exactly_one_finding(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "tldr_fields_missing_how_we_know.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual(f["rule"], "TLDR_FIELDS")
+        self.assertIn("missing **How we'll know:**", f["message"])
+
+    def test_empty_marker_line_is_still_reported_as_no_value(self) -> None:
+        # Regression guard on the pre-existing fixture: the bound must not
+        # turn "present but empty" into "missing".
+        data = lint_json(str(HARDENING_DIR / "tldr_fields_empty_how_we_know.md"), "--json")
+        self.assertEqual([f["rule"] for f in data["findings"]], ["TLDR_FIELDS"])
+        self.assertIn("has no value", data["findings"][0]["message"])
+
+
 class RulesFormatHardeningTests(unittest.TestCase):
     def test_stray_line_message_matches_the_spec_wording(self) -> None:
         data = lint_json(str(HARDENING_DIR / "rules_format_stray_line.md"), "--json")
@@ -185,8 +246,29 @@ class AcceptanceTableTests(unittest.TestCase):
         data = lint_json(str(HARDENING_DIR / "acceptance_table_wrong_cell_count.md"), "--json")
         findings = [f for f in data["findings"] if f["rule"] == "ACCEPTANCE_TABLE"]
         self.assertEqual(len(findings), 1)
-        self.assertIn("3 cells", findings[0]["message"])
-        self.assertIn("expected 4", findings[0]["message"])
+        self.assertIn("4 cells", findings[0]["message"])
+        self.assertIn("expected 5", findings[0]["message"])
+
+    def test_row_missing_its_outer_pipe_is_reported_at_its_own_line(self) -> None:
+        # AT-2 (line 81) lost its trailing pipe. The row is read GFM-style
+        # and reported at ITS line — not as a TAGS_RESOLVE on §0 line 18 or a
+        # SCENARIOS_COUNT on line 23, which is what silently dropping the row
+        # (and AT-3 below it) used to produce.
+        data = lint_json(str(HARDENING_DIR / "acceptance_table_row_missing_pipe.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"], f["severity"]), ("ACCEPTANCE_TABLE", 81, "error"))
+        self.assertIn("leading or trailing pipe", f["message"])
+
+    def test_row_missing_its_outer_pipe_is_still_extracted_with_every_row_below_it(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROWS), str(HARDENING_DIR / "acceptance_table_row_missing_pipe.md"), "--json"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = json.loads(result.stdout)["rows"]
+        self.assertEqual([r["id"] for r in rows], ["AT-1", "AT-2", "AT-3"])
+        self.assertEqual(rows[1]["then"], "notifications resume immediately")
 
     def test_conforming_fixture_has_no_acceptance_table_finding(self) -> None:
         data = lint_json(str(FIXTURES_DIR / "conforming.md"), "--json")
@@ -194,12 +276,51 @@ class AcceptanceTableTests(unittest.TestCase):
 
     def test_second_non_acceptance_table_in_s6_still_ignored(self) -> None:
         # architecture.md's own contract: a second, non-acceptance table in
-        # SS6 (fixtures/second_table_in_s6.md) is not subject to row rules.
-        # ACCEPTANCE_TABLE must honour it exactly like the older SS6 rules.
+        # §6 (fixtures/second_table_in_s6.md) is not subject to row rules.
+        # ACCEPTANCE_TABLE must honour it exactly like the older §6 rules.
         result = run(str(FIXTURES_DIR / "second_table_in_s6.md"), "--json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         data = json.loads(result.stdout)
         self.assertEqual(data["findings"], [])
+
+
+class FenceUnclosedTests(unittest.TestCase):
+    """FENCE_UNCLOSED (error): a fence opened and never closed is named at
+    its own line, so a wall of "missing heading" findings at line 1 has a
+    stated cause."""
+
+    def _fence_line(self) -> int:
+        lines = (HARDENING_DIR / FENCE_UNCLOSED_CASCADE_FIXTURE).read_text(encoding="utf-8").splitlines()
+        return lines.index("```") + 1
+
+    def test_a_trailing_unclosed_fence_fires_alone_at_its_own_line(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "fence_unclosed.md"), "--json")
+        self.assertEqual([(f["rule"], f["severity"]) for f in data["findings"]], [("FENCE_UNCLOSED", "error")])
+        lines = (HARDENING_DIR / "fence_unclosed.md").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(data["findings"][0]["line"], len(lines))
+
+    def test_unclosed_fence_is_reported_at_the_opening_line(self) -> None:
+        result = run(str(HARDENING_DIR / FENCE_UNCLOSED_CASCADE_FIXTURE), "--json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        error_rules = {f["rule"] for f in data["findings"] if f["severity"] == "error"}
+        self.assertIn("FENCE_UNCLOSED", error_rules)
+        self.assertIn("HEADINGS_BARE", error_rules, "the cascade the rule explains still fires")
+        fence = [f for f in data["findings"] if f["rule"] == "FENCE_UNCLOSED"]
+        self.assertEqual(len(fence), 1)
+        self.assertEqual(fence[0]["line"], self._fence_line())
+        self.assertIn("never closed", fence[0]["message"])
+        self.assertIn("illustration", fence[0]["message"])
+
+    def test_a_closed_fence_does_not_fire(self) -> None:
+        for filename in ("fenced_tldr_before.md", "fenced_heading_in_s5.md"):
+            with self.subTest(fixture=filename):
+                data = lint_json(str(FIXTURES_DIR / filename), "--json")
+                self.assertFalse(any(f["rule"] == "FENCE_UNCLOSED" for f in data["findings"]))
+
+    def test_conforming_fixture_has_no_fence_finding(self) -> None:
+        data = lint_json(str(FIXTURES_DIR / "conforming.md"), "--json")
+        self.assertFalse(any(f["rule"] == "FENCE_UNCLOSED" for f in data["findings"]))
 
 
 class HeadingsBareDuplicateTests(unittest.TestCase):
@@ -219,13 +340,127 @@ class HeadingsBareDuplicateTests(unittest.TestCase):
         self.assertEqual(len(data["findings"]), 1)
 
 
+class AcceptanceAltitudeTests(unittest.TestCase):
+    """ACCEPTANCE_ALTITUDE (error, every status): an Altitude cell is empty or
+    not exactly one of the five values. ALTITUDE_MISSING (warn) covers the
+    absent column and lives with the other warn fixtures in test_scripts.py."""
+
+    def test_unknown_value_names_the_value_and_the_five_altitudes(self) -> None:
+        data = lint_json(str(FIXTURES_DIR / "acceptance_altitude.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"], f["severity"]), ("ACCEPTANCE_ALTITUDE", 81, "error"))
+        self.assertIn("'bogus'", f["message"])
+        for value in ("data", "response", "perception", "judgement", "sibling"):
+            self.assertIn(value, f["message"])
+
+    def test_empty_cell_is_reported_as_empty(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "acceptance_altitude_empty_cell.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("ACCEPTANCE_ALTITUDE", 82))
+        self.assertIn("empty", f["message"])
+
+    def test_fires_at_draft_too(self) -> None:
+        # The fixture is Status: draft — the rule is not gated on status.
+        text = (FIXTURES_DIR / "acceptance_altitude.md").read_text(encoding="utf-8")
+        self.assertIn("Status: draft", text)
+
+    def test_case_is_not_folded(self) -> None:
+        # `Perception` is not `perception`: the five values are exact.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "doc.md"
+            text = (FIXTURES_DIR / "conforming.md").read_text(encoding="utf-8")
+            path.write_text(text.replace("| perception |", "| Perception |", 1), encoding="utf-8")
+            data = lint_json(str(path), "--json")
+            self.assertEqual([f["rule"] for f in data["findings"]], ["ACCEPTANCE_ALTITUDE"])
+
+    def test_angle_placeholder_cell_is_placeholders_concern_only(self) -> None:
+        # `<altitude>` (the template's own cell) is one PLACEHOLDER finding,
+        # never an ACCEPTANCE_ALTITUDE one on top — and nothing at all under
+        # --template.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "doc.md"
+            text = (FIXTURES_DIR / "conforming.md").read_text(encoding="utf-8")
+            path.write_text(text.replace("| perception |", "| <altitude> |", 1), encoding="utf-8")
+            data = lint_json(str(path), "--json")
+            self.assertEqual([f["rule"] for f in data["findings"]], ["PLACEHOLDER"])
+            result = run("--template", str(path), "--json")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["findings"], [])
+
+
+class WhyLineValueTests(unittest.TestCase):
+    def test_empty_value_is_a_why_line_finding_at_the_line(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "why_line_empty_value.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("WHY_LINE", 64))
+        self.assertIn("§4", f["message"])
+        self.assertIn("has no value", f["message"])
+
+    def test_placeholder_value_is_a_placeholder_finding_not_a_why_line_one(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "placeholder_angle_in_why_line.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("PLACEHOLDER", 73))
+        self.assertIn("<one line>", f["message"])
+        self.assertIn("§5 Why line", f["message"])
+
+    def test_missing_line_fixture_unaffected(self) -> None:
+        data = lint_json(str(FIXTURES_DIR / "why_line.md"), "--json")
+        self.assertEqual([f["rule"] for f in data["findings"]], ["WHY_LINE"])
+        self.assertIn("is missing a line", data["findings"][0]["message"])
+
+
 class PlaceholderExtensionTests(unittest.TestCase):
     def test_angle_bracket_in_tldr_block(self) -> None:
         data = lint_json(str(HARDENING_DIR / "placeholder_angle_in_tldr.md"), "--json")
         findings = [f for f in data["findings"] if f["rule"] == "PLACEHOLDER"]
         self.assertEqual(len(findings), 1)
         self.assertIn("<needs input>", findings[0]["message"])
-        self.assertIn("SS0", findings[0]["message"])
+        self.assertIn("§0", findings[0]["message"])
+
+    def test_angle_bracket_in_agent_note(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "placeholder_angle_in_agent_note.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("PLACEHOLDER", 27))
+        self.assertIn("in an agent note", f["message"])
+
+    def test_angle_bracket_on_a_s3_example_line(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "placeholder_angle_in_s3_example.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("PLACEHOLDER", 47))
+        self.assertIn("<Ana takes the primary action>", f["message"])
+        self.assertIn("§3 worked example", f["message"])
+
+    def test_angle_bracket_in_a_s9_owner(self) -> None:
+        data = lint_json(str(HARDENING_DIR / "placeholder_angle_in_s9_owner.md"), "--json")
+        self.assertEqual(len(data["findings"]), 1, data["findings"])
+        f = data["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("PLACEHOLDER", 102))
+        self.assertIn("'<name>'", f["message"])
+        self.assertIn("§9 owner", f["message"])
+
+    def test_generics_in_the_mechanism_body_are_not_placeholders(self) -> None:
+        # The scans are scoped: `Map<string, Row>` in §5's prose is code, not
+        # a slot, and must not be reported.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "doc.md"
+            text = (FIXTURES_DIR / "conforming.md").read_text(encoding="utf-8")
+            path.write_text(
+                text.replace(
+                    "This adds a `mutedChannels` join table",
+                    "This adds a `mutedChannels` join table (a Map<string, Row> in memory)",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = run(str(path), "--json")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["findings"], [])
 
     def test_angle_bracket_in_header_owner_value(self) -> None:
         data = lint_json(str(HARDENING_DIR / "placeholder_angle_in_header_owner.md"), "--json")
@@ -246,7 +481,7 @@ class PlaceholderExtensionTests(unittest.TestCase):
         findings = [f for f in data["findings"] if f["rule"] == "PLACEHOLDER"]
         self.assertEqual(len(findings), 1)
         self.assertIn("<verify>", findings[0]["message"])
-        self.assertIn("SS6", findings[0]["message"])
+        self.assertIn("§6", findings[0]["message"])
 
     def test_original_term_based_placeholder_fixture_unaffected(self) -> None:
         # Regression guard: TBD/TODO-style term matching (unrelated to the
@@ -326,6 +561,32 @@ class TemplateFlagTests(unittest.TestCase):
         result = run("-h")
         self.assertEqual(result.returncode, 0)
         self.assertIn("--template", result.stdout)
+
+    def test_a_freshly_rendered_doc_fails_with_placeholder_findings_only(self) -> None:
+        """The raw output of render_outcome.py --dry-run is the template with
+        the H1 and Owner filled and every other slot still a placeholder:
+        it must fail a normal lint with PLACEHOLDER findings and nothing
+        else, naming each scanned surface, so a render change that drops
+        the header fill or adds unscanned prose cannot pass unnoticed. The
+        filled counterpart, fixtures/conforming.md, lints with zero
+        findings — test_scripts.LintConformingTests pins that half."""
+        with tempfile.TemporaryDirectory() as tmp:
+            render = subprocess.run(
+                [sys.executable, str(RENDER), "--dry-run", "--title", "Probe", "--owner", "Priya",
+                 "--docs-home", "docs", "--cwd", tmp],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            self.assertEqual(render.returncode, 0, render.stdout + render.stderr)
+            doc = Path(tmp) / "doc.md"
+            doc.write_text(render.stdout, encoding="utf-8")
+            result = run(str(doc), "--json")
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            findings = json.loads(result.stdout)["findings"]
+        self.assertEqual(sorted({f["rule"] for f in findings}), ["PLACEHOLDER"])
+        messages = " ".join(f["message"] for f in findings)
+        for surface in ("in an agent note", "in a §3 worked example", "in a §4 Why line", "in a §9 owner"):
+            self.assertIn(surface, messages, messages)
+        self.assertFalse(any("Owner:" in f["message"] for f in findings), "--owner fills the header")
 
 
 class UnreadableTests(unittest.TestCase):

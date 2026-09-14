@@ -6,21 +6,37 @@
     python3 lint_outcome.py doc.md --strict
     python3 lint_outcome.py doc.md --template
 
-Checks the rules in references/architecture.md SS9 against the Outcome
-Framework template shape: SS0 TLDR budget and non-empty fields, rule
-bullet format and tags, headings, the SS6 acceptance table (rule id
+Checks the rules in references/architecture.md §9 against the Outcome
+Framework template shape: §0 TLDR budget and non-empty fields, rule
+bullet format and tags (and that ``**Rules:**`` holds at least one rule,
+rule id RULES_PRESENT), headings, the §6 acceptance table (rule id
 ACCEPTANCE_TABLE: a qualifying header, at least one data row, non-empty
-Given/When/Then cells), the Why lines, and placeholder text (rule id
-PLACEHOLDER: TBD/TODO/etc markers plus any angle-bracket ``<...>`` run
-in SS0, in the header ``Owner:``/``Last decision:`` values, or in a SS6
-data cell), and status authority (rule id BUILDING_NEEDS_GATE: a
-``building`` doc's header carries no red-gate commit sha). ``--template``
-exempts angle-bracket placeholders and the literal ``YYYY-MM-DD`` so the
-bundled template itself can be linted; every other rule stays active
-under it. A path that cannot be read as UTF-8 text reports one
-UNREADABLE finding for itself instead of raising.
-Exit 0 when there are no findings, 1 when there are findings (errors,
-or warnings too under --strict), 2 on a usage error. Human output is
+Given/When/Then cells, and every row bounded by a leading and a trailing
+pipe -- a row missing one is still read, GFM-style, and reported at its
+own line rather than dropped with every row below it), the §6 Altitude
+column (rule id ACCEPTANCE_ALTITUDE: every cell is one of ``data``,
+``response``, ``perception``, ``judgement``, ``sibling``; and, as a
+warning, ALTITUDE_MISSING when a table has no ``Altitude`` header), the
+Why lines (rule id WHY_LINE: present in §4-§7, each with a value), and
+placeholder text (rule id PLACEHOLDER: TBD/TODO/etc markers plus any
+angle-bracket ``<...>`` run in §0, in the header ``Owner:``/``Last
+decision:`` values, in a §6 data cell, in an agent note, on a §3
+example's first line, in a §9 owner, or in a Why line's value), and
+status authority (rule id BUILDING_NEEDS_GATE: a ``building`` doc's
+header carries no red-gate commit sha). ``--template`` exempts
+angle-bracket placeholders and the literal ``YYYY-MM-DD`` so the bundled
+template itself can be linted; every other rule stays active under it.
+Lines inside a fenced code block (``` or ~~~) are illustrations: no
+heading, field marker, table row or placeholder inside one counts,
+though the lines still count toward a line budget; a fence that is
+opened and never closed is its own finding (rule id FENCE_UNCLOSED, at
+the opening line), since every line after it would otherwise vanish
+from the scan with nothing naming the cause. A path that cannot be
+read as UTF-8 text reports one UNREADABLE finding for itself instead
+of raising.
+Exit 0 when there is no error finding (a warning on its own exits 0), 1
+when there is an error finding (a warning too under --strict, which
+promotes every warning to an error), 2 on a usage error. Human output is
 one line per finding: ``<path>:<line>: <RULE_ID> <message>``. ``--json``
 prints one JSON object for a single file, or a JSON array of one such
 object per file when a directory was given. Deterministic; no network.
@@ -34,7 +50,7 @@ import json
 import os
 import re
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Pattern, Tuple, Union
 
 TLDR_HEADING = "## 0. TLDR"
 AGENT_NOTES_PREFIX = "Agent notes"
@@ -66,6 +82,11 @@ WHY_SECTIONS = (4, 5, 6, 7)
 PLACEHOLDER_TERMS = ("tbd", "todo", "<fill", "decide later")
 TEMPLATE_DATE_PLACEHOLDER = "YYYY-MM-DD"
 
+# The five altitudes of references/altitude.md -- what a §6 row's Then
+# asserts on. Matched exactly (after trimming), never case-folded.
+ALTITUDES = ("data", "response", "perception", "judgement", "sibling")
+
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
 HEADING_RE = re.compile(r"^## (\d+)\.\s*(.*?)\s*$")
 ANY_HEADING_RE = re.compile(r"^## \d+\.")
 STATUS_RE = re.compile(r"^Status:\s*(\S+)")
@@ -75,17 +96,28 @@ TAG_RE = re.compile(r"→\s*(UNTESTED|AT-\d+(?:\s*,\s*AT-\d+)*)\s*$")
 TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 AT_ID_RE = re.compile(r"^AT-\d+$")
-WHY_LINE_RE = re.compile(r"^Why\s*[-—]\s*what breaks without it:")
+WHY_LINE_RE = re.compile(r"^Why\s*[-—]\s*what breaks without it:(.*)$")
 SCENARIOS_RE = re.compile(
-    r"\*\*Scenarios:\*\*\s*(\d+)\s*acceptance rows[^,]*,\s*(\d+)\s*worked examples"
+    r"\*\*Scenarios:\*\*\s*(\d+)\s*acceptance rows[^,]*,\s*(\d+)\s*worked examples?"
 )
 NOTE_START_RE = re.compile(r"^(\d+)\.\s+")
 H3_RE = re.compile(r"^###\s+\S")
 BOLD_LED_RE = re.compile(r"^\*\*[^*]+\*\*")
+BOLD_FIELD_RE = re.compile(r"^\s*\*\*[^*]+:\*\*")
 ANGLE_PLACEHOLDER_RE = re.compile(r"<[^<>]+>")
+OPEN_QUESTION_OWNER_RE = re.compile(r"^Q\w*\s*[-—]\s*owner:\s*(<[^<>]+>)")
 RED_GATE_LINE_RE = re.compile(
     r"^Red gate:\s+([0-9a-fA-F]{7,40})\s+(\d{4}-\d{2}-\d{2})\s*$"
 )
+
+RULES_MARKER = "**Rules:**"
+# The How-we'll-know marker as a person sees it, plus the curly-apostrophe
+# spelling (U+2019) a word processor substitutes -- both are the same
+# field, so neither is reported as missing.
+HOW_WE_KNOW_MARKER = "**How we'll know:**"
+HOW_WE_KNOW_RE = re.compile(r"\*\*How we['’]ll know:\*\*")
+
+Marker = Union[str, Pattern[str]]
 
 
 def read_text_tolerant(path: str) -> str:
@@ -102,42 +134,79 @@ def find_line_index(lines: List[str], predicate, start: int = 0) -> Optional[int
     return None
 
 
+def unfenced(lines: List[str]) -> List[str]:
+    """A copy of ``lines`` with every line inside a fenced code block (and the
+    fence lines themselves) replaced by "", so indices stay aligned with the
+    original while no heading, marker, table row or placeholder inside a
+    fence can match a structural scan. A fence opens and closes on any line
+    starting with ``` or ~~~ (the same rule framework_section.py uses)."""
+    out: List[str] = []
+    in_fence = False
+    for line in lines:
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        out.append("" if in_fence else line)
+    return out
+
+
 def finding(rule: str, line: Optional[int], message: str, severity: str) -> Dict[str, Any]:
     return {"rule": rule, "line": line, "message": message, "severity": severity}
 
 
+def _marker_span(line: str, marker: Marker) -> Optional[Tuple[int, int]]:
+    """(start, end) of ``marker`` -- a literal or a compiled pattern -- on
+    ``line``, or None when it is not there."""
+    if isinstance(marker, str):
+        pos = line.find(marker)
+        return (pos, pos + len(marker)) if pos != -1 else None
+    m = marker.search(line)
+    return (m.start(), m.end()) if m else None
+
+
 # ---------------------------------------------------------------------------
-# Shared structural lookups (also used by outcome_rows.py)
+# Shared structural lookups (also used by outcome_rows.py and bridge_validate.py)
 # ---------------------------------------------------------------------------
+
+
+def _heading_number(line: str) -> Optional[str]:
+    m = HEADING_RE.match(line)
+    return m.group(1) if m else None
 
 
 def section_bounds(lines: List[str], n: int) -> Optional[Tuple[int, int]]:
-    """0-indexed [start, end) line range for ``## n. ...`` through the next heading."""
-    start = find_line_index(lines, lambda l: HEADING_RE.match(l) and HEADING_RE.match(l).group(1) == str(n))
+    """0-indexed [start, end) line range for ``## n. ...`` through the next heading.
+
+    Headings inside a fenced code block are illustrations, not sections."""
+    scan = unfenced(lines)
+    start = find_line_index(scan, lambda l: _heading_number(l) == str(n))
     if start is None:
         return None
-    end = find_line_index(lines, lambda l: ANY_HEADING_RE.match(l), start=start + 1)
+    end = find_line_index(scan, lambda l: ANY_HEADING_RE.match(l) is not None, start=start + 1)
     return start, end if end is not None else len(lines)
 
 
 def tldr_block_bounds(lines: List[str]) -> Optional[Tuple[int, int]]:
-    """0-indexed [start, end) for SS0: the heading line up to (not incl.) Agent notes / SS1."""
-    start = find_line_index(lines, lambda l: l.startswith(TLDR_HEADING))
+    """0-indexed [start, end) for §0: the heading line up to (not incl.) Agent notes / §1."""
+    scan = unfenced(lines)
+    start = find_line_index(scan, lambda l: l.startswith(TLDR_HEADING))
     if start is None:
         return None
-    end = find_line_index(lines, lambda l: l.startswith(AGENT_NOTES_PREFIX), start=start + 1)
+    end = find_line_index(scan, lambda l: l.startswith(AGENT_NOTES_PREFIX), start=start + 1)
     if end is None:
-        end = find_line_index(lines, lambda l: l.startswith("## 1."), start=start + 1)
+        end = find_line_index(scan, lambda l: l.startswith("## 1."), start=start + 1)
     if end is None:
         end = len(lines)
     return start, end
 
 
 def get_status(lines: List[str]) -> Optional[str]:
-    idx = find_line_index(lines, lambda l: STATUS_RE.match(l) is not None)
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: STATUS_RE.match(l) is not None)
     if idx is None:
         return None
-    return STATUS_RE.match(lines[idx]).group(1)
+    return STATUS_RE.match(scan[idx]).group(1)
 
 
 def parse_header_field_value(
@@ -162,22 +231,45 @@ def parse_header_field_value(
     return value.strip()
 
 
-def _rules_block_bounds(lines: List[str]) -> Tuple[Optional[int], Optional[int]]:
-    """0-indexed (rules_idx, how_idx) bracketing the SS0 rules block.
+def _rules_block_bounds(lines: List[str]) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """0-indexed (rules_idx, how_idx, end) bracketing the §0 rules block.
 
-    ``rules_idx`` is the ``**Rules:**`` line, or None when it is absent.
-    ``how_idx`` is the following ``**How we'll know:**`` line, or None when
-    there is none after it.
+    ``rules_idx`` is the ``**Rules:**`` line inside §0 (or, when the doc has
+    no §0 heading at all, the first one anywhere), or None when absent.
+    ``end`` is where the block stops: the next bold ``**Field:**`` marker
+    (normally ``**How we'll know:**``, else ``**Scenarios:**``), the next
+    ``## `` heading, or the end of §0 -- whichever comes first. It is never
+    the end of the file while any of those exists, so a missing or
+    mistyped How-we'll-know marker cannot sweep the rest of the doc into
+    the rules block. ``how_idx`` is the ``**How we'll know:**`` line (ASCII
+    or curly apostrophe) when it is the line that ends the block, else None.
     """
-    rules_idx = find_line_index(lines, lambda l: "**Rules:**" in l)
+    scan = unfenced(lines)
+    tldr = tldr_block_bounds(lines)
+    if tldr is not None:
+        tldr_start, tldr_end = tldr
+        rules_idx = find_line_index(scan, lambda l: RULES_MARKER in l, start=tldr_start)
+        if rules_idx is not None and rules_idx >= tldr_end:
+            rules_idx = None
+    else:
+        tldr_end = len(lines)
+        rules_idx = find_line_index(scan, lambda l: RULES_MARKER in l)
     if rules_idx is None:
-        return None, None
-    how_idx = find_line_index(lines, lambda l: "**How we'll know:**" in l, start=rules_idx + 1)
-    return rules_idx, how_idx
+        return None, None, None
+    end = tldr_end
+    stop = find_line_index(
+        scan,
+        lambda l: BOLD_FIELD_RE.match(l) is not None or l.startswith("## "),
+        start=rules_idx + 1,
+    )
+    if stop is not None and stop < end:
+        end = stop
+    how_idx = end if end < len(lines) and HOW_WE_KNOW_RE.search(scan[end]) else None
+    return rules_idx, how_idx, end
 
 
 def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[int], Optional[int]]:
-    """Parse the SS0 rules between **Rules:** and **How we'll know:**.
+    """Parse the §0 rules between **Rules:** and the next bold field.
 
     Returns (records, rules_line_idx, how_we_know_line_idx). Each record:
     ``{"start_line": 1-based, "format": "bullet"|"numbered", "raw_text": str,
@@ -188,15 +280,15 @@ def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[
     entirely — ``check_rules_format`` reports it as a stray line. Returns
     ([], None, None) when the **Rules:** anchor is absent.
     """
-    rules_idx, how_idx = _rules_block_bounds(lines)
+    rules_idx, how_idx, end = _rules_block_bounds(lines)
     if rules_idx is None:
         return [], None, None
-    end = how_idx if how_idx is not None else len(lines)
+    scan = unfenced(lines)
 
     records: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
     for i in range(rules_idx + 1, end):
-        raw_line = lines[i]
+        raw_line = scan[i]
         if not raw_line.strip():
             current = None
             continue
@@ -231,18 +323,18 @@ def parse_rules_block(lines: List[str]) -> Tuple[List[Dict[str, Any]], Optional[
 
 
 def find_stray_rule_lines(lines: List[str]) -> List[int]:
-    """1-based line numbers in the SS0 rules block that are neither a
+    """1-based line numbers in the §0 rules block that are neither a
     ``- `` bullet, a numbered item, nor an indented continuation of the
     line before them. Empty when the **Rules:** anchor is absent."""
-    rules_idx, how_idx = _rules_block_bounds(lines)
+    rules_idx, _how_idx, end = _rules_block_bounds(lines)
     if rules_idx is None:
         return []
-    end = how_idx if how_idx is not None else len(lines)
+    scan = unfenced(lines)
 
     stray: List[int] = []
     open_rule = False
     for i in range(rules_idx + 1, end):
-        raw_line = lines[i]
+        raw_line = scan[i]
         if not raw_line.strip():
             open_rule = False
             continue
@@ -259,24 +351,55 @@ def find_stray_rule_lines(lines: List[str]) -> List[int]:
 ACCEPTANCE_HEADER_RE = re.compile(r"^(#|id|at)$", re.IGNORECASE)
 
 
-def split_tables(lines: List[str], start: int, end: int) -> List[List[Tuple[int, List[str]]]]:
+def split_tables(
+    lines: List[str], start: int, end: int, pipeless: Optional[List[int]] = None
+) -> List[List[Tuple[int, List[str]]]]:
     """Every pipe table in [start, end) as its own list of (line_no, cells).
 
     A table is a run of consecutive pipe rows; any other line ends it. A section may
     hold several tables, and only the acceptance table is subject to row-id rules.
+
+    A line directly under a running table that contains a pipe but lacks its
+    leading or trailing one is still a row of that table -- GFM treats the
+    outer pipes as optional -- and is read with the outer pipes stripped, so
+    a one-character slip never drops the row, nor every intact row below
+    it. Its 1-based line number is appended to ``pipeless`` when a list is
+    given, so ACCEPTANCE_TABLE can report it at its own line. Rows inside a
+    fenced code block are not rows. A Why line or the Snapshot line -- the
+    two structural lines the contract puts directly under the table -- ends
+    the table even when its prose holds a pipe: a structural line is never
+    a row.
     """
+    scan = unfenced(lines)
     tables: List[List[Tuple[int, List[str]]]] = []
     current: List[Tuple[int, List[str]]] = []
     for i in range(start, end):
-        m = TABLE_ROW_RE.match(lines[i].rstrip("\r\n"))
+        line = scan[i].rstrip("\r\n")
+        m = TABLE_ROW_RE.match(line)
         if m:
             current.append((i + 1, [c.strip() for c in m.group(1).split("|")]))
+        elif current and "|" in line and not _is_structural_under_table(line):
+            inner = line.strip().strip("|")
+            current.append((i + 1, [c.strip() for c in inner.split("|")]))
+            if pipeless is not None:
+                pipeless.append(i + 1)
         elif current:
             tables.append(current)
             current = []
     if current:
         tables.append(current)
     return tables
+
+
+def _is_structural_under_table(line: str) -> bool:
+    """True for a Why line or a Snapshot line (a leading backtick or
+    asterisk tolerated on the latter, as bridge_validate.py tolerates it):
+    the lines the contract places directly under the §6 table, which end
+    a table whatever characters their prose carries."""
+    stripped = line.lstrip()
+    if WHY_LINE_RE.match(stripped):
+        return True
+    return stripped.lstrip("`*").startswith("Snapshot taken at")
 
 
 def is_separator(cells: List[str]) -> bool:
@@ -303,11 +426,11 @@ def parse_table_data_rows(lines: List[str], start: int, end: int) -> List[Tuple[
 
 
 REQUIRED_ACCEPTANCE_COLUMNS = ("given", "when", "then")
-NAMED_ACCEPTANCE_COLUMNS = REQUIRED_ACCEPTANCE_COLUMNS + ("row",)
+NAMED_ACCEPTANCE_COLUMNS = REQUIRED_ACCEPTANCE_COLUMNS + ("altitude", "row")
 
 
 def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optional[int]]]:
-    """Column name -> 0-based index for one SS6 acceptance-table header, or
+    """Column name -> 0-based index for one §6 acceptance-table header, or
     None when the header does not qualify as an acceptance table at all.
 
     Columns are matched by HEADER NAME, case-insensitive and trimmed, never
@@ -318,14 +441,16 @@ def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optiona
     positional by definition, not looked up by name. ``Given``, ``When``
     and ``Then`` must each appear by name somewhere in the header (any
     order); a header missing one of them does not qualify, the same as no
-    table at all. ``Row`` is optional: its index when a column is named
-    ``Row``, else None, so a doc with no Row column reads every row's
-    ``row`` as None rather than misreading some other column. Any other
-    header cell (``Label``, ``Notes``, ...) sits in the table but is never
-    read into a named field. A header that names ``Given``, ``When``,
-    ``Then`` or ``Row`` more than once does not qualify either — there is
-    no rule for which occurrence is "the" column, so this never guesses;
-    ACCEPTANCE_TABLE reports it the same as a header missing one of them.
+    table at all. ``Altitude`` and ``Row`` are optional: each maps to its
+    index when a column carries that name, else None, so a doc without one
+    reads every row's ``altitude``/``row`` as None rather than misreading
+    some other column (ALTITUDE_MISSING warns about the absent Altitude
+    column separately). Any other header cell (``Label``, ``Notes``, ...)
+    sits in the table but is never read into a named field. A header that
+    names ``Given``, ``When``, ``Then``, ``Altitude`` or ``Row`` more than
+    once does not qualify either — there is no rule for which occurrence
+    is "the" column, so this never guesses; ACCEPTANCE_TABLE reports it the
+    same as a header missing one of them.
     """
     if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
         return None
@@ -346,28 +471,32 @@ def acceptance_column_map(header_cells: List[str]) -> Optional[Dict[str, Optiona
             return None
     mapping: Dict[str, Optional[int]] = {"id": 0}
     mapping.update({name: by_name[name] for name in REQUIRED_ACCEPTANCE_COLUMNS})
+    mapping["altitude"] = by_name.get("altitude")
     mapping["row"] = by_name.get("row")
     return mapping
 
 
 def find_acceptance_tables(
     lines: List[str], start: int, end: int
-) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]], Optional[Dict[str, Optional[int]]]]]:
+) -> List[Tuple[int, List[str], List[Tuple[int, List[str]]], Optional[Dict[str, Optional[int]]], List[int]]]:
     """Every #/ID/AT-headed candidate table in [start, end), qualifying or not.
 
     A table is a candidate the instant its header's first cell is
     #/ID/AT -- acceptance_column_map then says whether it QUALIFIES (a
-    dict) or not (None -- missing or duplicate Given/When/Then/Row). Every
-    candidate is returned either way, so a malformed table is still
+    dict) or not (None -- missing or duplicate Given/When/Then/Altitude/Row).
+    Every candidate is returned either way, so a malformed table is still
     reported by ACCEPTANCE_TABLE even when a sibling table in the same
     section qualifies fine -- the two are never conflated into one verdict
     for the section. A table whose first cell does not match at all is not
     a candidate (a Decisions-style table, say) and is not returned. Returns
-    a list of (header_line, header_cells, data_rows, column_map_or_None),
-    each already separator-stripped.
+    a list of (header_line, header_cells, data_rows, column_map_or_None,
+    pipeless_row_lines), each already separator-stripped; the last element
+    is the 1-based line of every row in that table that lacks its leading
+    or trailing pipe (see split_tables).
     """
+    pipeless: List[int] = []
     found = []
-    for table in split_tables(lines, start, end):
+    for table in split_tables(lines, start, end, pipeless):
         header_line, header_cells = table[0]
         if not header_cells or not ACCEPTANCE_HEADER_RE.match(header_cells[0]):
             continue
@@ -375,7 +504,10 @@ def find_acceptance_tables(
         body = table[1:]
         if body and is_separator(body[0][1]):
             body = body[1:]
-        found.append((header_line, header_cells, body, column_map))
+        own_lines = {line_no for line_no, _cells in body}
+        found.append(
+            (header_line, header_cells, body, column_map, [n for n in pipeless if n in own_lines])
+        )
     return found
 
 
@@ -386,39 +518,50 @@ def _cell_at(cells: List[str], idx: Optional[int]) -> str:
 
 
 def parse_acceptance_rows(lines: List[str]) -> List[Dict[str, Any]]:
-    """Well-formed SS6 rows (id, given, when, then, row) keyed on AT-\\d+.
+    """Well-formed §6 rows (id, given, when, then, altitude, row) keyed on AT-\\d+.
 
     Reuses find_acceptance_tables so a table is a candidate on exactly the
     same terms ACCEPTANCE_TABLE judges it by. A QUALIFYING header (see
     acceptance_column_map) is read by name -- an extra column (a Label) or
-    a reordered Row never shifts what a cell means, and row is None
-    whenever no header cell is named Row. A candidate whose header does
-    NOT qualify (missing or duplicate Given/When/Then/Row --
-    ACCEPTANCE_TABLE reports the header itself as broken) still
-    contributes its row ids, for SCENARIOS_COUNT's count and
-    TAGS_RESOLVE's lookup -- but ONLY that: given/when/then come back
-    empty and row comes back None, never a value read from a position
-    that might belong to an entirely different column (the concrete
-    failure this guards: a duplicate Then column, read positionally, put
-    the second Then's text into row).
+    a reordered Row never shifts what a cell means, and altitude/row are
+    None whenever no header cell is named Altitude/Row (or the cell is
+    empty). A candidate whose header does NOT qualify (missing or duplicate
+    Given/When/Then/Altitude/Row -- ACCEPTANCE_TABLE reports the header
+    itself as broken) still contributes its row ids, for SCENARIOS_COUNT's
+    count and TAGS_RESOLVE's lookup -- but ONLY that: given/when/then come
+    back empty and altitude/row come back None, never a value read from a
+    position that might belong to an entirely different column (the
+    concrete failure this guards: a duplicate Then column, read
+    positionally, put the second Then's text into row).
     """
     bounds = section_bounds(lines, 6)
     if bounds is None:
         return []
     start, end = bounds
     rows = []
-    for header_line, header_cells, body, column_map in find_acceptance_tables(lines, start + 1, end):
+    for _header_line, _header_cells, body, column_map, _pipeless in find_acceptance_tables(
+        lines, start + 1, end
+    ):
         for line_no, cells in body:
             if not cells or not AT_ID_RE.match(cells[0]):
                 continue
             if column_map is None:
                 rows.append(
-                    {"line": line_no, "id": cells[0], "given": "", "when": "", "then": "", "row": None}
+                    {
+                        "line": line_no,
+                        "id": cells[0],
+                        "given": "",
+                        "when": "",
+                        "then": "",
+                        "altitude": None,
+                        "row": None,
+                    }
                 )
                 continue
             given = _cell_at(cells, column_map["given"])
             when = _cell_at(cells, column_map["when"])
             then = _cell_at(cells, column_map["then"])
+            altitude_text = _cell_at(cells, column_map["altitude"]).strip()
             row_text = _cell_at(cells, column_map["row"]).strip()
             rows.append(
                 {
@@ -427,26 +570,28 @@ def parse_acceptance_rows(lines: List[str]) -> List[Dict[str, Any]]:
                     "given": given,
                     "when": when,
                     "then": then,
+                    "altitude": altitude_text or None,
                     "row": row_text or None,
                 }
             )
     return rows
 
 
-def parse_bold_field_value(lines: List[str], marker: str) -> str:
-    """The text after a ``**Field:**`` marker, with wrapped continuation
-    lines joined. Continuation stops at a blank line, the next bold field,
-    or a ``- `` bullet — whichever comes first. Empty when ``marker`` is
-    not found in ``lines`` at all."""
-    idx = find_line_index(lines, lambda l: marker in l)
+def parse_bold_field_value(lines: List[str], marker: Marker) -> str:
+    """The text after a ``**Field:**`` marker (a literal, or a compiled
+    pattern such as HOW_WE_KNOW_RE), with wrapped continuation lines
+    joined. Continuation stops at a blank line, the next bold field, or a
+    ``- `` bullet — whichever comes first. Empty when ``marker`` is not
+    found in ``lines`` at all. Fenced lines never carry the marker."""
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: _marker_span(l, marker) is not None)
     if idx is None:
         return ""
-    pos = lines[idx].find(marker)
-    parts = [lines[idx][pos + len(marker):].strip()]
+    _start, end_of_marker = _marker_span(scan[idx], marker)
+    parts = [scan[idx][end_of_marker:].strip()]
     i = idx + 1
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
+    while i < len(scan):
+        stripped = scan[i].strip()
         if not stripped or stripped.startswith("**") or stripped.startswith("-"):
             break
         parts.append(stripped)
@@ -456,11 +601,11 @@ def parse_bold_field_value(lines: List[str], marker: str) -> str:
 
 def parse_signal(lines: List[str]) -> str:
     """The **How we'll know:** text, with wrapped continuation lines joined."""
-    return parse_bold_field_value(lines, "**How we'll know:**")
+    return parse_bold_field_value(lines, HOW_WE_KNOW_RE)
 
 
 def worked_examples(lines: List[str]) -> Tuple[List[Tuple[int, int]], Optional[str]]:
-    """SS3 example (start, end) 0-indexed ranges, and which pattern was used.
+    """§3 example (start, end) 0-indexed ranges, and which pattern was used.
 
     Tries ``### `` headings first, then bold-led paragraphs. Returns
     ``([], None)`` when neither pattern yields at least one example.
@@ -469,8 +614,9 @@ def worked_examples(lines: List[str]) -> Tuple[List[Tuple[int, int]], Optional[s
     if bounds is None:
         return [], None
     start, end = bounds
+    scan = unfenced(lines)
     for pattern, kind in ((H3_RE, "heading"), (BOLD_LED_RE, "bold")):
-        starts = [i for i in range(start + 1, end) if pattern.match(lines[i])]
+        starts = [i for i in range(start + 1, end) if pattern.match(scan[i])]
         if starts:
             ranges = []
             for idx, s in enumerate(starts):
@@ -486,10 +632,11 @@ def worked_examples(lines: List[str]) -> Tuple[List[Tuple[int, int]], Optional[s
 
 
 def check_header_status(lines: List[str]) -> List[Dict[str, Any]]:
-    idx = find_line_index(lines, lambda l: STATUS_RE.match(l) is not None)
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: STATUS_RE.match(l) is not None)
     if idx is None:
         return [finding("HEADER_STATUS", 1, "missing a 'Status:' line", "error")]
-    match = STATUS_RE.match(lines[idx])
+    match = STATUS_RE.match(scan[idx])
     token = match.group(1)
     if token not in VALID_STATUS_TOKENS:
         return [
@@ -500,7 +647,7 @@ def check_header_status(lines: List[str]) -> List[Dict[str, Any]]:
                 "error",
             )
         ]
-    if token == "superseded-by" and not lines[idx][match.end():].strip():
+    if token == "superseded-by" and not scan[idx][match.end():].strip():
         return [
             finding(
                 "HEADER_STATUS",
@@ -513,14 +660,15 @@ def check_header_status(lines: List[str]) -> List[Dict[str, Any]]:
 
 
 def check_header_owner(lines: List[str]) -> List[Dict[str, Any]]:
+    scan = unfenced(lines)
     out = []
-    owner_idx = find_line_index(lines, lambda l: "Owner:" in l)
+    owner_idx = find_line_index(scan, lambda l: "Owner:" in l)
     if owner_idx is None:
         out.append(finding("HEADER_OWNER", 1, "missing an 'Owner:' field", "error"))
-    elif not parse_header_field_value(lines, owner_idx, "Owner:", "Last decision:"):
+    elif not parse_header_field_value(scan, owner_idx, "Owner:", "Last decision:"):
         out.append(finding("HEADER_OWNER", owner_idx + 1, "'Owner:' value is empty", "error"))
 
-    last_decision_idx = find_line_index(lines, lambda l: "Last decision:" in l)
+    last_decision_idx = find_line_index(scan, lambda l: "Last decision:" in l)
     if last_decision_idx is None:
         out.append(
             finding(
@@ -530,7 +678,7 @@ def check_header_owner(lines: List[str]) -> List[Dict[str, Any]]:
                 "error",
             )
         )
-    elif not parse_header_field_value(lines, last_decision_idx, "Last decision:"):
+    elif not parse_header_field_value(scan, last_decision_idx, "Last decision:"):
         out.append(
             finding("HEADER_OWNER", last_decision_idx + 1, "'Last decision:' value is empty", "error")
         )
@@ -538,13 +686,14 @@ def check_header_owner(lines: List[str]) -> List[Dict[str, Any]]:
 
 
 def check_contents_line(lines: List[str]) -> List[Dict[str, Any]]:
-    idx = find_line_index(lines, lambda l: l.strip().startswith("Contents:"))
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: l.strip().startswith("Contents:"))
     if idx is None:
         return [finding("CONTENTS_LINE", 1, "missing a 'Contents:' line", "error")]
-    block = [lines[idx]]
+    block = [scan[idx]]
     i = idx + 1
-    while i < len(lines) and lines[i].strip():
-        block.append(lines[i])
+    while i < len(scan) and scan[i].strip():
+        block.append(scan[i])
         i += 1
     text = " ".join(block)
     missing = [a for a in CONTENTS_ANCHORS if a not in text]
@@ -562,7 +711,7 @@ def check_contents_line(lines: List[str]) -> List[Dict[str, Any]]:
 
 def check_headings_bare(lines: List[str]) -> List[Dict[str, Any]]:
     by_number: Dict[int, List[Tuple[int, str]]] = {}
-    for i, line in enumerate(lines):
+    for i, line in enumerate(unfenced(lines)):
         m = HEADING_RE.match(line)
         if not m:
             continue
@@ -613,7 +762,7 @@ def check_tldr_budget(lines: List[str]) -> List[Dict[str, Any]]:
             finding(
                 "TLDR_BUDGET",
                 start + 1,
-                f"SS0 TLDR block is {count} lines (max 40)",
+                f"§0 TLDR block is {count} lines (max 40)",
                 "error",
             )
         ]
@@ -625,25 +774,53 @@ def check_tldr_fields(lines: List[str]) -> List[Dict[str, Any]]:
     if bounds is None:
         return []
     start, end = bounds
-    block_lines = lines[start:end]
-    block_text = " ".join(block_lines)
+    block_lines = unfenced(lines)[start:end]
     out = []
-    for field in ("**Outcome:**", "**Rules:**", "**How we'll know:**", "**Scenarios:**"):
-        if field not in block_text:
-            out.append(finding("TLDR_FIELDS", start + 1, f"SS0 is missing {field}", "error"))
+    fields: List[Tuple[str, Marker]] = [
+        ("**Outcome:**", "**Outcome:**"),
+        ("**Rules:**", RULES_MARKER),
+        (HOW_WE_KNOW_MARKER, HOW_WE_KNOW_RE),
+        ("**Scenarios:**", "**Scenarios:**"),
+    ]
+    present = {
+        name: find_line_index(block_lines, lambda l, m=marker: _marker_span(l, m) is not None)
+        for name, marker in fields
+    }
+    for name, _marker in fields:
+        if present[name] is None:
+            out.append(finding("TLDR_FIELDS", start + 1, f"§0 is missing {name}", "error"))
 
     # A field that IS present must still carry a value — text on the marker's
     # own line, or on indented/plain continuation lines before the next bold
-    # field. **Rules:** and **Scenarios:** have their own dedicated shape
-    # rules (RULES_FORMAT/RULES_TAGGED, SCENARIOS_COUNT) so only the two
-    # freeform fields are checked for emptiness here.
-    for field in ("**Outcome:**", "**How we'll know:**"):
-        if field not in block_text:
+    # field. **Rules:** has its own shape rules (RULES_PRESENT for an empty
+    # block, RULES_FORMAT/RULES_TAGGED for each bullet) and **Scenarios:**
+    # has SCENARIOS_COUNT, so only the two freeform fields are checked for
+    # emptiness here.
+    for name, marker in fields:
+        if name not in ("**Outcome:**", HOW_WE_KNOW_MARKER) or present[name] is None:
             continue
-        if not parse_bold_field_value(block_lines, field):
-            rel_idx = find_line_index(block_lines, lambda l, field=field: field in l)
-            out.append(finding("TLDR_FIELDS", start + rel_idx + 1, f"{field} has no value", "error"))
+        if not parse_bold_field_value(block_lines, marker):
+            out.append(finding("TLDR_FIELDS", start + present[name] + 1, f"{name} has no value", "error"))
     return out
+
+
+def check_rules_present(lines: List[str]) -> List[Dict[str, Any]]:
+    """A ``**Rules:**`` marker with no rule bullet under it is an error at
+    every status: a field checked for presence is also checked for a value,
+    the same as ``**Outcome:**`` and ``**How we'll know:**``. A block that
+    holds only stray text is left to RULES_FORMAT, which already names the
+    stray line, so the two never fire together on the same defect."""
+    records, rules_idx, _ = parse_rules_block(lines)
+    if rules_idx is None or records or find_stray_rule_lines(lines):
+        return []
+    return [
+        finding(
+            "RULES_PRESENT",
+            rules_idx + 1,
+            "**Rules:** has no rule bullets (at least one '- ' rule is required)",
+            "error",
+        )
+    ]
 
 
 def check_rules_format(lines: List[str]) -> List[Dict[str, Any]]:
@@ -698,7 +875,7 @@ def check_tags_resolve(lines: List[str]) -> List[Dict[str, Any]]:
                     finding(
                         "TAGS_RESOLVE",
                         r["start_line"],
-                        f"{tag} cited in SS0 does not exist as a SS6 row id",
+                        f"{tag} cited in §0 does not exist as a §6 row id",
                         "error",
                     )
                 )
@@ -718,11 +895,11 @@ def check_at_ids_unique(lines: List[str]) -> List[Dict[str, Any]]:
         row_id = cells[0]
         if not AT_ID_RE.match(row_id):
             out.append(
-                finding("AT_IDS_UNIQUE", line_no, f"SS6 row id {row_id!r} does not match AT-\\d+", "error")
+                finding("AT_IDS_UNIQUE", line_no, f"§6 row id {row_id!r} does not match AT-\\d+", "error")
             )
             continue
         if row_id in seen:
-            out.append(finding("AT_IDS_UNIQUE", line_no, f"duplicate SS6 row id {row_id}", "error"))
+            out.append(finding("AT_IDS_UNIQUE", line_no, f"duplicate §6 row id {row_id}", "error"))
         else:
             seen[row_id] = line_no
     return out
@@ -740,7 +917,7 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
             finding(
                 "ACCEPTANCE_TABLE",
                 start + 1,
-                "SS6 has no acceptance table (need a header row whose first cell is "
+                "§6 has no acceptance table (need a header row whose first cell is "
                 "'#', 'ID' or 'AT' and which names Given, When and Then)",
                 "error",
             )
@@ -751,16 +928,30 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
 
+    # A row missing its leading or trailing pipe is read anyway (see
+    # split_tables) and reported at its own line, for every candidate table.
+    for _header_line, _header_cells, _body, _column_map, pipeless in tables:
+        for line_no in pipeless:
+            out.append(
+                finding(
+                    "ACCEPTANCE_TABLE",
+                    line_no,
+                    "acceptance table row is missing its leading or trailing pipe "
+                    "(a line with a pipe directly under a table is read as one of its rows)",
+                    "error",
+                )
+            )
+
     if not qualifying:
         # Every #/ID/AT-headed candidate failed its own header check --
         # report each on the "no acceptance table" terms (matches the
         # single-candidate case's long-standing message), at its own line.
-        for header_line, _header_cells, _body, _column_map in malformed:
+        for header_line, _header_cells, _body, _column_map, _pipeless in malformed:
             out.append(
                 finding(
                     "ACCEPTANCE_TABLE",
                     header_line,
-                    "SS6 has no acceptance table (need a header row whose first cell is "
+                    "§6 has no acceptance table (need a header row whose first cell is "
                     "'#', 'ID' or 'AT' and which names Given, When and Then)",
                     "error",
                 )
@@ -771,20 +962,20 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
     # its own terms -- never silently dropped just because another table
     # in the same section is fine (that used to make a duplicate-column
     # sibling produce zero findings at all).
-    for header_line, _header_cells, _body, _column_map in malformed:
+    for header_line, _header_cells, _body, _column_map, _pipeless in malformed:
         out.append(
             finding(
                 "ACCEPTANCE_TABLE",
                 header_line,
                 "a second acceptance-shaped table's header does not qualify — Given, When "
-                "and Then must each appear exactly once (Row at most once)",
+                "and Then must each appear exactly once (Altitude and Row at most once)",
                 "error",
             )
         )
 
     total_rows = 0
     required_cell_names = ("Given", "When", "Then")
-    for header_line, header_cells, body, column_map in qualifying:
+    for header_line, header_cells, body, column_map, _pipeless in qualifying:
         width = len(header_cells)
         for line_no, cells in body:
             total_rows += 1
@@ -816,21 +1007,86 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
     return out
 
 
+def check_acceptance_altitude(lines: List[str]) -> List[Dict[str, Any]]:
+    """Every qualifying §6 table names each row's altitude.
+
+    ACCEPTANCE_ALTITUDE (error, every status): the ``Altitude`` column is
+    present and a data cell is empty or not exactly one of ``data``,
+    ``response``, ``perception``, ``judgement``, ``sibling``. A cell that
+    is an angle-bracket placeholder (``<altitude>``) is PLACEHOLDER's
+    concern, not this rule's, so the bundled template reports it once. A
+    row whose cell count differs from the header's is ACCEPTANCE_TABLE's
+    concern and is skipped here. ALTITUDE_MISSING (warn): a qualifying
+    table has no ``Altitude`` header at all -- an older doc keeps linting,
+    and the warning says what to add.
+    """
+    bounds = section_bounds(lines, 6)
+    if bounds is None:
+        return []
+    start, end = bounds
+    out: List[Dict[str, Any]] = []
+    for header_line, header_cells, body, column_map, _pipeless in find_acceptance_tables(
+        lines, start + 1, end
+    ):
+        if column_map is None:
+            continue
+        idx = column_map["altitude"]
+        if idx is None:
+            out.append(
+                finding(
+                    "ALTITUDE_MISSING",
+                    header_line,
+                    "§6 acceptance table has no Altitude column (add one between Then and Row; "
+                    "each cell is data, response, perception, judgement or sibling)",
+                    "warn",
+                )
+            )
+            continue
+        for line_no, cells in body:
+            if len(cells) != len(header_cells):
+                continue
+            value = cells[idx].strip()
+            if ANGLE_PLACEHOLDER_RE.fullmatch(value):
+                continue
+            if not value:
+                out.append(
+                    finding(
+                        "ACCEPTANCE_ALTITUDE",
+                        line_no,
+                        "acceptance table row's Altitude cell is empty "
+                        "(one of data, response, perception, judgement, sibling)",
+                        "error",
+                    )
+                )
+            elif value not in ALTITUDES:
+                out.append(
+                    finding(
+                        "ACCEPTANCE_ALTITUDE",
+                        line_no,
+                        f"acceptance table row's Altitude {value!r} is not one of "
+                        "data, response, perception, judgement, sibling",
+                        "error",
+                    )
+                )
+    return out
+
+
 def check_scenarios_count(lines: List[str]) -> List[Dict[str, Any]]:
     bounds = tldr_block_bounds(lines)
     if bounds is None:
         return []
     start, end = bounds
-    idx = find_line_index(lines, lambda l: "**Scenarios:**" in l, start=start)
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: "**Scenarios:**" in l, start=start)
     if idx is None or idx >= end:
         return []
-    m = SCENARIOS_RE.search(lines[idx])
+    m = SCENARIOS_RE.search(scan[idx])
     if not m:
         return [
             finding(
                 "SCENARIOS_COUNT",
                 idx + 1,
-                "Scenarios: line does not match '<N> acceptance rows (SS6), <M> worked examples (SS3).'",
+                "Scenarios: line does not match '<N> acceptance rows (§6), <M> worked examples (§3).'",
                 "error",
             )
         ]
@@ -842,7 +1098,7 @@ def check_scenarios_count(lines: List[str]) -> List[Dict[str, Any]]:
             finding(
                 "SCENARIOS_COUNT",
                 idx + 1,
-                f"Scenarios: claims {n_claimed} acceptance rows but SS6 has {n_actual}",
+                f"Scenarios: claims {n_claimed} acceptance rows but §6 has {n_actual}",
                 "error",
             )
         )
@@ -852,7 +1108,7 @@ def check_scenarios_count(lines: List[str]) -> List[Dict[str, Any]]:
             finding(
                 "SCENARIOS_COUNT",
                 idx + 1,
-                "SS3 worked-example count not checked (no '### ' headings or bold-led paragraphs found)",
+                "§3 worked-example count not checked (no '### ' headings or bold-led paragraphs found)",
                 "warn",
             )
         )
@@ -863,29 +1119,59 @@ def check_scenarios_count(lines: List[str]) -> List[Dict[str, Any]]:
                 finding(
                     "SCENARIOS_COUNT",
                     idx + 1,
-                    f"Scenarios: claims {m_claimed} worked examples but SS3 has {m_actual}",
+                    f"Scenarios: claims {m_claimed} worked examples but §3 has {m_actual}",
                     "error",
                 )
             )
     return out
 
 
+def _why_lines(lines: List[str], n: int) -> List[Tuple[int, str]]:
+    """(0-indexed line, value after the colon) of every Why line in section n."""
+    bounds = section_bounds(lines, n)
+    if bounds is None:
+        return []
+    start, end = bounds
+    scan = unfenced(lines)
+    out = []
+    for i in range(start, end):
+        m = WHY_LINE_RE.match(scan[i].lstrip())
+        if m:
+            out.append((i, m.group(1).strip()))
+    return out
+
+
 def check_why_line(lines: List[str]) -> List[Dict[str, Any]]:
+    """§4-§7 each carry a ``Why — what breaks without it:`` line, and the line
+    carries a value. An angle-bracket value (``<one line>``) is a
+    placeholder, reported by PLACEHOLDER rather than here, so the template
+    lints under ``--template`` and a raw render reports each slot once."""
     out = []
     for n in WHY_SECTIONS:
         bounds = section_bounds(lines, n)
         if bounds is None:
             continue
-        start, end = bounds
-        if not any(WHY_LINE_RE.match(lines[i].lstrip()) for i in range(start, end)):
+        found = _why_lines(lines, n)
+        if not found:
             out.append(
                 finding(
                     "WHY_LINE",
-                    start + 1,
-                    f"SS{n} is missing a line beginning 'Why — what breaks without it:'",
+                    bounds[0] + 1,
+                    f"§{n} is missing a line beginning 'Why — what breaks without it:'",
                     "error",
                 )
             )
+            continue
+        for i, value in found:
+            if not value:
+                out.append(
+                    finding(
+                        "WHY_LINE",
+                        i + 1,
+                        f"§{n} 'Why — what breaks without it:' has no value",
+                        "error",
+                    )
+                )
     return out
 
 
@@ -914,35 +1200,29 @@ def check_building_needs_gate(lines: List[str]) -> List[Dict[str, Any]]:
     exactly — ``Red gate: <sha> <YYYY-MM-DD>``, sha 7-40 hex characters
     (digits alone qualify), date a real calendar date. Error when `Status:`
     is `building` and no line in the header block (everything before the
-    first ``## `` heading, skipping any fenced ``` ```/``~~~`` block the same
-    way ``framework_section.py`` skips one) matches it. Position among the
-    header lines is not enforced, the line's own shape is: a hex-looking run
-    inside some other header value (``Supersedes: deadbeef``, a digit-only
-    ``Last decision:``) does not satisfy it, nor does a ``Red gate:`` line
-    sitting inside a fenced code block (an illustration, not the doc's own
-    header) — only a real, unfenced ``Red gate:`` line with a real date
-    does. A line matching the sha/date shape but naming a date that does not
-    exist (a day past the last of its month) is reported on its own terms, not silently
+    first ``## `` heading, fenced lines excluded the way every other scan
+    excludes them) matches it. Position among the header lines is not
+    enforced, the line's own shape is: a hex-looking run inside some other
+    header value (``Supersedes: deadbeef``, a digit-only ``Last decision:``)
+    does not satisfy it, nor does a ``Red gate:`` line sitting inside a
+    fenced code block (an illustration, not the doc's own header) — only a
+    real, unfenced ``Red gate:`` line with a real date does. A line matching
+    the sha/date shape but naming a date that does not exist (a day past
+    the last of its month) is reported on its own terms, not silently
     treated as no line at all.
     """
     status = get_status(lines)
     if status != "building":
         return []
 
-    header_end = find_line_index(lines, lambda l: l.startswith("## "))
+    scan = unfenced(lines)
+    header_end = find_line_index(scan, lambda l: l.startswith("## "))
     if header_end is None:
         header_end = len(lines)
 
     bad_date_finding: Optional[Dict[str, Any]] = None
-    in_fence = False
     for i in range(header_end):
-        stripped = lines[i].lstrip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        m = RED_GATE_LINE_RE.match(lines[i])
+        m = RED_GATE_LINE_RE.match(scan[i])
         if not m:
             continue
         date_text = m.group(2)
@@ -972,9 +1252,23 @@ def check_building_needs_gate(lines: List[str]) -> List[Dict[str, Any]]:
     ]
 
 
+def _agent_notes_bounds(lines: List[str]) -> Optional[Tuple[int, int]]:
+    """0-indexed [start, end) from the Agent notes line up to ``## 1.``."""
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: l.startswith(AGENT_NOTES_PREFIX))
+    if idx is None:
+        return None
+    end = find_line_index(scan, lambda l: l.startswith("## 1."), start=idx + 1)
+    return idx, end if end is not None else len(lines)
+
+
 def check_placeholder(lines: List[str], template: bool = False) -> List[Dict[str, Any]]:
-    """TBD/TODO-style terms, plus angle-bracket ``<...>`` placeholders, in SS0,
-    the header ``Owner:``/``Last decision:`` values, and SS6 data cells.
+    """TBD/TODO-style terms in §0, plus angle-bracket ``<...>`` placeholders
+    in §0, the header ``Owner:``/``Last decision:`` values, §6 data cells,
+    agent notes, the first line of each §3 worked example, a §9 question's
+    owner, and the value of each §4-§7 Why line. The scans are scoped on
+    purpose: §5's body may legitimately hold generics such as
+    ``Map<string, Row>``, so no whole-document scan is made.
 
     ``template=True`` exempts angle-bracket placeholders and the literal
     ``YYYY-MM-DD`` (the bundled template's own placeholder shapes) so the
@@ -983,89 +1277,124 @@ def check_placeholder(lines: List[str], template: bool = False) -> List[Dict[str
     """
     out: List[Dict[str, Any]] = []
     seen_terms = set()
+    scan = unfenced(lines)
 
     bounds = tldr_block_bounds(lines)
     if bounds is not None:
         start, end = bounds
         for i in range(start, end):
-            lowered = lines[i].lower()
+            lowered = scan[i].lower()
             for term in PLACEHOLDER_TERMS:
                 if term in lowered and term not in seen_terms:
                     seen_terms.add(term)
-                    out.append(finding("PLACEHOLDER", i + 1, f"placeholder text {term!r} found in SS0", "error"))
+                    out.append(finding("PLACEHOLDER", i + 1, f"placeholder text {term!r} found in §0", "error"))
             if not template:
-                for m in ANGLE_PLACEHOLDER_RE.finditer(lines[i]):
+                for m in ANGLE_PLACEHOLDER_RE.finditer(scan[i]):
                     out.append(
-                        finding("PLACEHOLDER", i + 1, f"placeholder {m.group(0)!r} found in SS0", "error")
+                        finding("PLACEHOLDER", i + 1, f"placeholder {m.group(0)!r} found in §0", "error")
                     )
 
-    if not template:
-        owner_idx = find_line_index(lines, lambda l: "Owner:" in l)
-        if owner_idx is not None:
-            value = parse_header_field_value(lines, owner_idx, "Owner:", "Last decision:")
-            for m in ANGLE_PLACEHOLDER_RE.finditer(value):
-                out.append(
-                    finding(
-                        "PLACEHOLDER",
-                        owner_idx + 1,
-                        f"placeholder {m.group(0)!r} found in the header 'Owner:' value",
-                        "error",
-                    )
-                )
+    if template:
+        return out
 
-        last_decision_idx = find_line_index(lines, lambda l: "Last decision:" in l)
-        if last_decision_idx is not None:
-            value = parse_header_field_value(lines, last_decision_idx, "Last decision:")
-            for m in ANGLE_PLACEHOLDER_RE.finditer(value):
-                out.append(
-                    finding(
-                        "PLACEHOLDER",
-                        last_decision_idx + 1,
-                        f"placeholder {m.group(0)!r} found in the header 'Last decision:' value",
-                        "error",
-                    )
+    owner_idx = find_line_index(scan, lambda l: "Owner:" in l)
+    if owner_idx is not None:
+        value = parse_header_field_value(scan, owner_idx, "Owner:", "Last decision:")
+        for m in ANGLE_PLACEHOLDER_RE.finditer(value):
+            out.append(
+                finding(
+                    "PLACEHOLDER",
+                    owner_idx + 1,
+                    f"placeholder {m.group(0)!r} found in the header 'Owner:' value",
+                    "error",
                 )
-            if value == TEMPLATE_DATE_PLACEHOLDER:
-                out.append(
-                    finding(
-                        "PLACEHOLDER",
-                        last_decision_idx + 1,
-                        f"placeholder {TEMPLATE_DATE_PLACEHOLDER!r} found in the header 'Last decision:' value",
-                        "error",
-                    )
-                )
+            )
 
-        bounds6 = section_bounds(lines, 6)
-        if bounds6 is not None:
-            start6, end6 = bounds6
-            for line_no, cells in parse_table_data_rows(lines, start6 + 1, end6):
-                for cell in cells:
-                    for m in ANGLE_PLACEHOLDER_RE.finditer(cell):
-                        out.append(
-                            finding(
-                                "PLACEHOLDER",
-                                line_no,
-                                f"placeholder {m.group(0)!r} found in an SS6 data cell",
-                                "error",
-                            )
+    last_decision_idx = find_line_index(scan, lambda l: "Last decision:" in l)
+    if last_decision_idx is not None:
+        value = parse_header_field_value(scan, last_decision_idx, "Last decision:")
+        for m in ANGLE_PLACEHOLDER_RE.finditer(value):
+            out.append(
+                finding(
+                    "PLACEHOLDER",
+                    last_decision_idx + 1,
+                    f"placeholder {m.group(0)!r} found in the header 'Last decision:' value",
+                    "error",
+                )
+            )
+        if value == TEMPLATE_DATE_PLACEHOLDER:
+            out.append(
+                finding(
+                    "PLACEHOLDER",
+                    last_decision_idx + 1,
+                    f"placeholder {TEMPLATE_DATE_PLACEHOLDER!r} found in the header 'Last decision:' value",
+                    "error",
+                )
+            )
+
+    bounds6 = section_bounds(lines, 6)
+    if bounds6 is not None:
+        start6, end6 = bounds6
+        for line_no, cells in parse_table_data_rows(lines, start6 + 1, end6):
+            for cell in cells:
+                for m in ANGLE_PLACEHOLDER_RE.finditer(cell):
+                    out.append(
+                        finding(
+                            "PLACEHOLDER",
+                            line_no,
+                            f"placeholder {m.group(0)!r} found in a §6 data cell",
+                            "error",
                         )
+                    )
+
+    notes = _agent_notes_bounds(lines)
+    if notes is not None:
+        for i in range(notes[0] + 1, notes[1]):
+            if not NOTE_START_RE.match(scan[i]):
+                continue
+            for m in ANGLE_PLACEHOLDER_RE.finditer(scan[i]):
+                out.append(
+                    finding("PLACEHOLDER", i + 1, f"placeholder {m.group(0)!r} found in an agent note", "error")
+                )
+
+    ranges, _kind = worked_examples(lines)
+    for s, _e in ranges:
+        for m in ANGLE_PLACEHOLDER_RE.finditer(scan[s]):
+            out.append(
+                finding("PLACEHOLDER", s + 1, f"placeholder {m.group(0)!r} found in a §3 worked example", "error")
+            )
+
+    bounds9 = section_bounds(lines, 9)
+    if bounds9 is not None:
+        for i in range(bounds9[0] + 1, bounds9[1]):
+            m = OPEN_QUESTION_OWNER_RE.match(scan[i])
+            if m:
+                out.append(
+                    finding("PLACEHOLDER", i + 1, f"placeholder {m.group(1)!r} found in a §9 owner", "error")
+                )
+
+    for n in WHY_SECTIONS:
+        for i, value in _why_lines(lines, n):
+            for m in ANGLE_PLACEHOLDER_RE.finditer(value):
+                out.append(
+                    finding("PLACEHOLDER", i + 1, f"placeholder {m.group(0)!r} found in a §{n} Why line", "error")
+                )
     return out
 
 
 def check_agent_notes_many(lines: List[str]) -> List[Dict[str, Any]]:
-    idx = find_line_index(lines, lambda l: l.startswith(AGENT_NOTES_PREFIX))
-    if idx is None:
+    notes = _agent_notes_bounds(lines)
+    if notes is None:
         return []
-    end = find_line_index(lines, lambda l: l.startswith("## 1."), start=idx + 1)
-    if end is None:
-        end = len(lines)
-    count = sum(1 for i in range(idx + 1, end) if NOTE_START_RE.match(lines[i]))
+    idx, end = notes
+    scan = unfenced(lines)
+    count = sum(1 for i in range(idx + 1, end) if NOTE_START_RE.match(scan[i]))
     if count > 8:
         return [
             finding(
                 "AGENT_NOTES_MANY",
                 idx + 1,
-                f"SS0 has {count} agent notes (consolidate past 8)",
+                f"§0 has {count} agent notes (consolidate past 8)",
                 "warn",
             )
         ]
@@ -1074,9 +1403,9 @@ def check_agent_notes_many(lines: List[str]) -> List[Dict[str, Any]]:
 
 def check_human_half_budget(lines: List[str]) -> List[Dict[str, Any]]:
     tldr_bounds = tldr_block_bounds(lines)
-    start = tldr_bounds[0] if tldr_bounds is not None else find_line_index(lines, lambda l: l.startswith(TLDR_HEADING))
-    if start is None:
+    if tldr_bounds is None:
         return []
+    start = tldr_bounds[0]
     section2 = section_bounds(lines, 2)
     if section2 is None:
         return []
@@ -1084,10 +1413,10 @@ def check_human_half_budget(lines: List[str]) -> List[Dict[str, Any]]:
     ranges, kind = worked_examples(lines)
     if kind is None:
         end = end_of_2
-        measured_note = "SS3 not measured (no parseable example found)"
+        measured_note = "§3 not measured (no parseable example found)"
     else:
         end = ranges[0][1]
-        measured_note = "through the first SS3 example"
+        measured_note = "through the first §3 example"
     count = end - start
     if count > 150:
         return [
@@ -1101,18 +1430,47 @@ def check_human_half_budget(lines: List[str]) -> List[Dict[str, Any]]:
     return []
 
 
+def check_unclosed_fence(lines: List[str]) -> List[Dict[str, Any]]:
+    """FENCE_UNCLOSED (error): a ``` / ~~~ fence opened and never closed.
+
+    Every line after such a fence is read as an illustration by every
+    other rule, so the doc would otherwise report a wall of "missing
+    heading" findings at line 1 and nothing naming the fence. Reported at
+    the opening fence's own line."""
+    in_fence = False
+    open_line: Optional[int] = None
+    for i, line in enumerate(lines):
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            open_line = i + 1 if in_fence else None
+    if in_fence and open_line is not None:
+        return [
+            finding(
+                "FENCE_UNCLOSED",
+                open_line,
+                "fenced code block opened here is never closed, so every line after it "
+                "is read as an illustration (no heading, field, table row or placeholder counts)",
+                "error",
+            )
+        ]
+    return []
+
+
 RULE_CHECKS = (
+    check_unclosed_fence,
     check_header_status,
     check_header_owner,
     check_contents_line,
     check_headings_bare,
     check_tldr_budget,
     check_tldr_fields,
+    check_rules_present,
     check_rules_format,
     check_rules_tagged,
     check_tags_resolve,
     check_at_ids_unique,
     check_acceptance_table,
+    check_acceptance_altitude,
     check_scenarios_count,
     check_why_line,
     check_untested_on_agreed,
@@ -1153,7 +1511,9 @@ def lint_file(path: str, strict: bool, template: bool = False) -> Dict[str, Any]
 
 
 def contains_tldr(path: str) -> bool:
-    """True when ``path`` is UTF-8 text containing the SS0 TLDR heading.
+    """True when ``path`` is UTF-8 text containing the §0 TLDR heading
+    outside any fenced code block (a framework or how-to that only shows
+    the heading inside a fence is not an outcome doc).
 
     A file that cannot be read or decoded also counts as True: a directory
     scan surfaces a broken doc as an UNREADABLE finding (via ``lint_file``)
@@ -1163,11 +1523,11 @@ def contains_tldr(path: str) -> bool:
         text = read_text_tolerant(path)
     except (OSError, UnicodeDecodeError):
         return True
-    return any(line.startswith(TLDR_HEADING) for line in text.splitlines())
+    return any(line.startswith(TLDR_HEADING) for line in unfenced(text.splitlines()))
 
 
 def collect_directory_docs(root: str) -> List[str]:
-    """Every *.md under root containing a SS0 TLDR heading, one level of recursion deep."""
+    """Every *.md under root containing a §0 TLDR heading, one level of recursion deep."""
     found = []
     for name in sorted(os.listdir(root)):
         full = os.path.join(root, name)
@@ -1191,6 +1551,13 @@ def format_human(results: List[Dict[str, Any]]) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # Findings carry '§', '→' and '—'. A console that cannot encode them
+    # (a cp1252 pipe on Windows, a C locale) prints '?' in their place
+    # rather than dying with UnicodeEncodeError and no findings at all.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
     parser = argparse.ArgumentParser(
         prog="lint_outcome.py",
         description="Check an outcome doc (or a directory of them) against the framework shape.",

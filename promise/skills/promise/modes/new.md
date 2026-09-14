@@ -1,6 +1,6 @@
 Read before this: references/slates.md · references/anti-rationalizations.md · references/altitude.md · templates/outcome-doc.md · outcome-framework.md § The contract · § Section rules
-Phase 0 line: mode `new` (say if inferred), framework source, docs home + its source, `plansFolder` (or "none"), whether a map is configured, and whether the project is adopted.
-Writes: one new doc under `docsHome`.
+Phase 0 line: mode `new` (say if inferred), framework source, docs home + its source, `plansFolder` (or "none"), whether a map is configured (orient's `mapUsable`), and whether the project is adopted.
+Writes: one new doc under `docsHome`, or under the `--docs-home` folder the user named when `docsHome` is null.
 
 # New — create an outcome doc
 
@@ -13,16 +13,23 @@ Never skip this, never draft ahead of it. The human half is §0 TLDR, §1
 Problem, §2 Outcome, and one seed worked example — framework § The contract
 (the 60-second standard): §0 ≤ 40 lines, the whole human half ≤ 150 lines.
 
-- **Interview-first.** Ask for problem, outcome and rules in the user's own
-  words — six lines is enough. Three explicit prompts: *what is true after
-  this ships* (§0 outcome line, expanded in §2), *why do we need it* (§2),
-  *how will we know* (§0 — the user's decision; never fill it in).
+- **Interview-first.** Ask for the human half in the user's own words — six
+  lines is enough. Five prompts, one turn: *what is true after this ships*
+  (§0 outcome line, expanded in §2), *why do we need it* (§2), *what must
+  always / never be true* (§0 rules — echo every line back for verbatim
+  confirmation before it enters), *how will we know* (§0 — the user's
+  decision; never fill it in), and *walk me through one concrete example*
+  (the §3 seed — named actors, concrete state, expected outcome; you extend
+  it later, never invent it). Confirm the **owner** for the header: propose
+  `git config user.name` as the **(Recommended)** default and wait for a yes
+  — `render_outcome.py` requires `--owner` and the lint rejects a placeholder.
 - **The outcome line and how-we'll-know are forced choices, never blanks.**
   Ask the open question first. If it doesn't come back as one crisp line,
   run the candidate-slate procedure for whichever field stalled —
   references/slates.md. **Rules are never slated:** extract candidates from
-  a braindump or transcript and present them back line by line for verbatim
-  confirmation; only confirmed lines enter §0, exactly as confirmed.
+  the interview answer, braindump or transcript and present them back line
+  by line for verbatim confirmation; only confirmed lines enter §0, exactly
+  as confirmed.
 - **Once the signal is chosen, re-read every OPEN decision against it** —
   framework § Section rules. An option under which the signal can't be
   staged has been ruled out; record the narrowing in §8 with the
@@ -55,24 +62,32 @@ for the same capability.
   cross-reference target. Three or more docs, or entangled scenarios → point
   the user at `/promise merge` instead of resolving it inline here.
 - `plansFolder` present and a touched plan doc has still-live content →
-  migrate it into the new doc's §7, then propose deleting the plan file. It
-  receives no new docs.
+  migrate it into the new doc's §7, then propose deleting the plan file in
+  the same commit as the new doc. It receives no new docs.
 - Wait for the user's yes before deleting anything.
 - `docsHome` is null → ask where outcome docs should live before writing a word.
-  A folder is created only on the user's explicit say-so here, or through `adopt`.
+  A folder is created only on the user's explicit choice — here, by passing the
+  folder they named with `--create-docs-home` below. `adopt` can pin the folder in
+  the config on the user's say-so, but it is still created here, on the first
+  write. Never create one unprompted.
 
 ## Draft the agent half
 
 Instantiate the template with `python3 "${CLAUDE_SKILL_DIR}/scripts/render_outcome.py"
---title "<Capability>" --owner "<name>"` — it writes `<docsHome>/<slug>.md`, refuses
-to overwrite, and leaves every interview placeholder for you to fill. Every
-current-state claim carries file:line evidence, verified this run — never
-remembered from an earlier one.
+--title "<Capability>" --owner "<name>" [--docs-home <folder> --create-docs-home]`
+— it writes `<docsHome>/<slug>.md`, refuses to overwrite, and leaves every
+interview placeholder for you to fill. `docsHome` null → pass the folder the
+user chose in the capability hunt as `--docs-home`, with `--create-docs-home`
+so the script creates it. Phase 0 warned `docsHome does not exist` (the user
+pinned it in `adopt`) → pass `--create-docs-home` alone. Otherwise omit both
+flags and it writes under Phase 0's `docsHome`. Every current-state claim
+carries file:line evidence, verified this run — never remembered from an
+earlier one.
 
 - **§3 Worked examples:** extend the user's seed to cover at minimum the
-  happy path, the disconnect/undo path, and the permission-removal path —
-  ABC form, named actors, concrete state, expected outcome. Show the diff
-  between your examples and the user's seed.
+  happy path, the undo/reverse path, and any permission or visibility edge
+  the capability has — ABC form, named actors, concrete state, expected
+  outcome. Show the diff between your examples and the user's seed.
 - **§4 Invariants:** if an invariants-analysis skill is available this
   session, offer it in one line, scoped to this capability, and wait for a
   yes — never auto-invoke it. Declined, or none available → derive §4
@@ -89,12 +104,14 @@ remembered from an earlier one.
 - **§6 Acceptance:** Given/When/Then rows, derived from §3 — every worked
   example yields at least one row. Capabilities about access, permission or
   visibility → phrase rows as user questions: `Given <role> | When they ask
-  "<question>" | Then answered / refused / partially answered`. For each
-  row, state its altitude — references/altitude.md. After drafting rows,
+  "<question>" | Then answered / refused / partially answered`. Each row's
+  altitude goes in the `Altitude` column — exactly one of `data`,
+  `response`, `perception`, `judgement`, `sibling` (references/altitude.md);
+  the lint rejects anything else. The `Row` column is already in the
+  template: leave it empty at `draft` — `arm` fills it when a map files the
+  rows, and nothing is filed in the map before then. After drafting rows,
   stamp each §0 rule's tag (`→ AT-n`, or `→ UNTESTED`) and say which rules
-  came out UNTESTED. A map is configured → note that rows earn a `Row`
-  column only once `arm` files them; nothing is filed in the map yet at
-  `draft`.
+  came out UNTESTED.
 - **§7 Build phases:** small, ordered, verifiable; each phase names the §6
   rows it turns green.
 - Every agent-half section ends `Why — what breaks without it:` — framework
@@ -104,15 +121,20 @@ remembered from an earlier one.
   separable outcomes, propose the split by outcome, not by layer.
 
 Before close-out, run `python3 "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py"
-<doc>` and fix every finding, or say why one stands.
+<doc>` and fix every finding, or say why one stands. The lint checks shape
+only. It does not check: that §3 holds at least one example, that §9
+questions carry an owner and a BLOCKING/non-blocking flag, that §4
+invariants name an enforcement point or UNENFORCED, that `Last decision:`
+is a real date, or whether a filled Why line, example or mechanism is
+*true* — read those yourself before close-out.
 
 ## Close out at draft
 
 - Number the agent notes and open questions (owner + BLOCKING flag on
   each).
 - Surface every decision you couldn't make as an explicit question with a
-  **(Recommended)** option and a completeness score; state the invariants
-  at stake in each option.
+  **(Recommended)** option and one reason; state the invariants at stake in
+  each option.
 - Set `Status: draft`. Moving to `agreed` is a human act — never do it
   yourself.
 - **Paste §0 inline in chat, verbatim.** It is the close-out deliverable —

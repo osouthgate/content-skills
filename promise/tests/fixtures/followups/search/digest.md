@@ -19,7 +19,7 @@ Contents: [0. TLDR](#0-tldr) · [1. Problem](#1-problem) · [2. Outcome](#2-outc
 - A member can turn the digest off from their notification settings.  → AT-2
 **How we'll know:** Ana receives a daily digest email every morning for a week,
 and Ben turns his off and gets nothing the next day.
-**Scenarios:** 2 acceptance rows (§6), 1 worked examples (§3).
+**Scenarios:** 2 acceptance rows (§6), 1 worked example (§3).
 
 Agent notes (appended, numbered — never edited into the block above; they sit
 under §0 but do NOT count toward its 40-line budget):
@@ -66,10 +66,10 @@ double-send or disagree on what counts as "unread".
 
 ## 6. Acceptance
 
-| #    | Given | When | Then |
-|------|-------|------|------|
-| AT-1 | Ana is subscribed to 3 channels | the daily digest job runs | Ana receives a daily digest email every morning |
-| AT-2 | Ben is receiving the digest | he opens notification settings and turns it off | Ben can unsubscribe from the digest at any time |
+| #    | Given | When | Then | Altitude |
+|------|-------|------|------|----------|
+| AT-1 | Ana is subscribed to 3 channels | the daily digest job runs | Ana receives a daily digest email every morning | perception |
+| AT-2 | Ben is receiving the digest | he opens notification settings and turns it off | Ben can unsubscribe from the digest at any time | perception |
 Why — what breaks without it: without a table, "acceptance" is a claim with
 nothing to point at.
 

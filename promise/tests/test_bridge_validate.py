@@ -97,10 +97,16 @@ def fixture_command(name: str, *extra_args: str) -> str:
 
 
 def bridged_project(project_dir: Path, row_id_pattern: Optional[str] = r"^R\d+$", with_row: bool = True) -> Path:
-    """A temp project dir whose map.row (when requested) runs fake_row.py."""
-    map_value = {"recipe": "docs/how-to/adding-a-row.md", "find": fixture_command("fake_row.py")}
-    if with_row:
-        map_value["row"] = fixture_command("fake_row.py")
+    """A temp project dir whose map orient reports as usable (recipe, find,
+    row strings; lanes an object of strings) and whose map.row runs
+    fake_row.py. ``with_row=False`` leaves map.row an empty string — still
+    a string, so the map stays usable, but no command is configured."""
+    map_value = {
+        "recipe": "docs/how-to/adding-a-row.md",
+        "find": fixture_command("fake_row.py"),
+        "row": fixture_command("fake_row.py") if with_row else "",
+        "lanes": {"data": "tests[]"},
+    }
     if row_id_pattern is not None:
         map_value["rowIdPattern"] = row_id_pattern
     write_config(project_dir, {"map": map_value})
@@ -233,6 +239,16 @@ class DriftTests(unittest.TestCase):
         self.assertTrue(by_id["AT-3"]["found"])
         self.assertFalse(by_id["AT-3"]["inSync"])
 
+    def test_drift_message_names_all_three_causes(self) -> None:
+        # The check is symmetric: it cannot tell a map that moved on from
+        # a §6 cell edited after the snapshot, so the message must name
+        # both, or it misdirects the reader to the map every time.
+        _, data = run_json(str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(self.project), "--json")
+        drift = next(f for f in data["findings"] if f["rule"] == "THEN_NOT_IN_MAP")
+        self.assertIn("the map has moved on", drift["message"])
+        self.assertIn("filed differently", drift["message"])
+        self.assertIn("§6 was edited after the snapshot", drift["message"])
+
     def test_adapter_called_once_per_distinct_row_id(self) -> None:
         # R1 covers both AT-1 and AT-2; a correct cache calls fake_row.py
         # once for R1 and once for R2, never twice for the same id. Proven
@@ -279,6 +295,38 @@ class MapNotConfiguredTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertEqual([f["rule"] for f in data["findings"]], ["MAP_NOT_CONFIGURED"])
 
+    def test_incomplete_map_is_map_not_configured_and_names_the_missing_keys(self) -> None:
+        # orient's mapUsable is the one source of "is a map configured":
+        # a map with only `row` set would have let the drift check run
+        # against fake_row.py, but it is not a map, so nothing is checked
+        # and the finding says which keys are missing.
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": {"row": fixture_command("fake_row.py")}})
+            log_path = project / "fake_row.log"
+            result, data = run_json(
+                str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(project), "--json",
+                env={"FAKE_ROW_LOG": str(log_path)},
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual([f["rule"] for f in data["findings"]], ["MAP_NOT_CONFIGURED"])
+            self.assertIn("map incomplete: missing recipe, find, lanes", data["findings"][0]["message"])
+            self.assertFalse(data["mapConfigured"])
+            self.assertFalse(data["bridged"])
+            self.assertEqual(data["rows"], [])
+            self.assertEqual(read_invocation_log(log_path), [], "nothing may be looked up against a partial map")
+
+    def test_empty_map_object_is_map_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_config(project, {"map": {}})
+            result, data = run_json(
+                str(FIXTURES_DIR / "agreed_bridged.md"), "--cwd", str(project), "--json"
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual([f["rule"] for f in data["findings"]], ["MAP_NOT_CONFIGURED"])
+            self.assertFalse(data["mapConfigured"])
+
     def test_draft_with_no_config_is_not_bridged_not_map_not_configured(self) -> None:
         # Precedence: NOT_BRIDGED is checked before MAP_NOT_CONFIGURED. A
         # draft doc has not been bridged regardless of whether a map is
@@ -294,6 +342,54 @@ class MapNotConfiguredTests(unittest.TestCase):
             self.assertEqual(data["status"], "draft")
             self.assertFalse(data["bridged"])
             self.assertFalse(data["mapConfigured"])
+
+
+class StatusUnknownTests(unittest.TestCase):
+    """A doc whose Status: is missing or not one of the five tokens is
+    neither bridged nor known to be unbridged: STATUS_UNKNOWN (error),
+    bridged false, and no other check — never validated as bridged with
+    ROW_MISSING quietly suppressed."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project = bridged_project(Path(self._tmp.name))
+        self.base = (FIXTURES_DIR / "agreed_bridged.md").read_text(encoding="utf-8")
+
+    def _doc(self, name: str, text: str) -> Path:
+        path = self.project / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def _assert_status_unknown(self, doc: Path, expected_status) -> None:
+        log_path = self.project / "fake_row.log"
+        result, data = run_json(str(doc), "--cwd", str(self.project), "--json", env={"FAKE_ROW_LOG": str(log_path)})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual([f["rule"] for f in data["findings"]], ["STATUS_UNKNOWN"])
+        self.assertEqual(data["findings"][0]["severity"], "error")
+        self.assertEqual(data["status"], expected_status)
+        self.assertFalse(data["bridged"])
+        self.assertTrue(data["mapConfigured"])
+        self.assertEqual(data["rows"], [])
+        self.assertEqual(read_invocation_log(log_path), [], "an unplaceable doc is never looked up against the map")
+
+    def test_invalid_status_token_is_status_unknown(self) -> None:
+        text = self.base.replace("Status: agreed\n", "Status: approved\n")
+        self.assertNotEqual(text, self.base)
+        self._assert_status_unknown(self._doc("invalid_status.md", text), "approved")
+
+    def test_missing_status_line_is_status_unknown(self) -> None:
+        text = self.base.replace("Status: agreed\n", "")
+        self.assertNotEqual(text, self.base)
+        self._assert_status_unknown(self._doc("no_status.md", text), None)
+
+    def test_invalid_status_with_a_missing_row_is_still_only_status_unknown(self) -> None:
+        # The doc that used to slip through: an invalid status made
+        # ROW_MISSING not apply, so the doc validated clean as "bridged".
+        text = (FIXTURES_DIR / "agreed_missing_row.md").read_text(encoding="utf-8").replace(
+            "Status: agreed\n", "Status: approved\n"
+        )
+        self._assert_status_unknown(self._doc("invalid_missing_row.md", text), "approved")
 
 
 class UnreadableTests(unittest.TestCase):
@@ -345,10 +441,15 @@ class HostileRowIdTests(unittest.TestCase):
         # whose worst case only prints something proves nothing either way.
         self.hostile = f'R1"; touch {self.marker}; echo "'
         base = (FIXTURES_DIR / "agreed_bridged.md").read_text(encoding="utf-8")
-        doc_text = base.replace(
-            "| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | R1 |",
-            f"| AT-1 | Ana is in a channel | she mutes it | she gets no push or badge from it | {self.hostile} |",
-        )
+        # Replace AT-1's Row cell (the last cell of its line) with the
+        # payload, whatever other columns the fixture's table carries.
+        replaced = []
+        for line in base.splitlines(keepends=True):
+            if line.startswith("| AT-1 "):
+                self.assertTrue(line.rstrip().endswith("| R1 |"), line)
+                line = line.rstrip()[: -len("| R1 |")] + f"| {self.hostile} |\n"
+            replaced.append(line)
+        doc_text = "".join(replaced)
         self.assertNotEqual(doc_text, base)
         self.doc = self.project / "hostile.md"
         self.doc.write_text(doc_text, encoding="utf-8")
@@ -467,7 +568,9 @@ class InvalidRowIdPatternTests(unittest.TestCase):
 
 
 class NoMapRowCommandTests(unittest.TestCase):
-    def test_missing_row_command_warns_and_skips_drift_check(self) -> None:
+    def test_empty_row_command_warns_and_skips_drift_check(self) -> None:
+        # mapUsable requires map.row to be a string; "" is one, and
+        # configures nothing — the one way this warning is still reached.
         with tempfile.TemporaryDirectory() as tmp:
             project = bridged_project(Path(tmp), with_row=False)
             result, data = run_json(

@@ -1,6 +1,6 @@
 Read before this: references/altitude.md · references/anti-rationalizations.md
 Read at Apply, not before: the project's `map.recipe` and `map.index`, if a map is configured — the match and route steps need only the adapter's output.
-Phase 0 line: mode `intake` (say if inferred), framework source, docs home and its source, the item count, whether the input is a feedback list, a single "add a scenario to `<row>`" ask, or a "which promise covers X" lookup (then run only the match step and answer), whether a map is configured, and whether the project is adopted.
+Phase 0 line: mode `intake` (say if inferred), framework source, docs home and its source, the item count, whether the input is a feedback list, a single "add a scenario to `<row>`" ask, or a "which promise covers X" lookup (then run only the match step and answer), whether a map is configured (orient's `mapUsable`), whether any `commands.*` is configured, and whether the project is adopted.
 Writes: per the recipe when a map is configured; else the outcome docs' §6 (Acceptance) and §9 (Open questions).
 
 # Intake — feedback in, promise changes out
@@ -44,16 +44,20 @@ A sentence carrying two claims is two items. Do not paraphrase in this table.
 
 For every item, in this order:
 
-1. Run `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" find "<the verbatim item>"`;
-   read the top 3–5 results, not only the first. A rank is where to start reading,
-   not a match. The adapter passes the item as one argument — never paste it into
-   a shell command yourself.
+1. (Gated once per session — SKILL.md Phase 0 asks before the first configured
+   command runs.) Write the verbatim item to a scratch file with the Write tool,
+   then run `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" find --query-file
+   <that file>`; read the top 3–5 results, not only the first. A rank is where to
+   start reading, not a match. The item never appears on a command line — the
+   same rule Phase 0 applies to the user's message.
 2. Read each plausible candidate in full with `adapter.py row <id>` — the story,
    the scenarios, the verdict, every evidence array. **Read the finding to the
    end**; the lede is the oldest claim.
-3. No map → `python3 "${CLAUDE_SKILL_DIR}/scripts/outcome_rows.py" --search "<the
-   verbatim item>" --dir <docsHome>` ranks every §6 row and §0 rule across the
-   outcome docs; read the top hits in their docs before deciding.
+3. No map → `python3 "${CLAUDE_SKILL_DIR}/scripts/outcome_rows.py" --search-file
+   <that file> --dir <docsHome>` ranks every §6 row and §0 rule across the
+   outcome docs by shared words; read the top hits in their docs before
+   deciding. A low score is where to start reading, never a licence to file a
+   new row — titles rarely share vocabulary with how a need is asked.
 4. Decide the relation:
 
    | Relation | Meaning |
@@ -74,7 +78,7 @@ scenario is discarded. Do step 4 (the relation call) yourself.
 
 Present the match table and **stop for approval** before drafting any Gherkin.
 Recommend one relation per item — **(Recommended)** first — with one concrete
-reason and a 1–10 completeness score per option.
+reason.
 
 ## Draft the Gherkin
 
@@ -135,17 +139,23 @@ No map — the same relations land in the docs instead, and only there:
 |---|---|
 | EXISTING-SCENARIO | nothing to file; note the paraphrase in the row's §9 answer or §8 entry if it sharpens the promise |
 | DEFECT | a dated §8 entry naming the AT row broken, plus a §9 question (BLOCKING if the doc is `agreed` or later) — the human decides whether the doc drops back to `draft` |
-| EXTEND | a new AT row appended to §6 of the doc whose story holds it; §0's tag for the rule it serves is re-stamped; `Scenarios:` re-counted |
+| EXTEND | a new AT row appended to §6 of the doc whose story holds it, with its `Altitude` cell filled; §0's tag for the rule it serves is re-stamped; `Scenarios:` re-counted |
 | NEW-ROW | a new outcome doc through the `new` procedure — never a row bolted onto a doc with a different story |
 | SURFACE | a line in §10 (out of scope) naming the doc that owns the surface, or a §9 non-blocking note when none does |
 | DECISION | a §9 question with an owner and a BLOCKING flag |
 
 ## Verify and hand back
 
-Run `python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" checks`, then `adapter.py verify`
-(the project's type-check, test and lint commands, in that order).
+The same sequence every writing mode runs. Run
+`python3 "${CLAUDE_SKILL_DIR}/scripts/adapter.py" checks` if a map is configured
+and `map.checks` is set (the adapter refuses with exit 2 otherwise — that is not a
+failed check); then `adapter.py --json verify` if any `commands.*` is configured
+— `[]` means nothing was verified: report it as "not verified (no commands
+configured)", never as a pass, and list the `op`s that actually ran; then
+`python3 "${CLAUDE_SKILL_DIR}/scripts/lint_outcome.py" <doc>` on every outcome
+doc this run touched, always.
 
 Report per item: what was filed, where, what proves it now, and what is still owed
-(a missing lane, a decision, a kill witness). Close with a reading assignment — the
-1–3 `file:line` spots the user should read to own the verdicts, one comprehension
-question each.
+(a missing lane, a decision, a kill witness). Offer a reading assignment — the
+1–3 `file:line` spots that let the user own the verdicts — and leave taking it
+to them.

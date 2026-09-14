@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -24,14 +25,18 @@ from pathlib import Path
 TESTS_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = TESTS_DIR / "fixtures"
 SCRIPTS_DIR = TESTS_DIR.parent / "skills" / "promise" / "scripts"
+FRAMEWORK = SCRIPTS_DIR.parent / "outcome-framework.md"
 
 ORIENT = SCRIPTS_DIR / "orient.py"
 LINT = SCRIPTS_DIR / "lint_outcome.py"
 ROWS = SCRIPTS_DIR / "outcome_rows.py"
 ADOPT = SCRIPTS_DIR / "adopt.py"
 
-# One fixture per error-severity rule in architecture.md SS9. Each fixture is
-# conforming.md with exactly one change, named after the rule it trips.
+# One fixture per error-severity rule in architecture.md §9. Each fixture is
+# conforming.md with exactly one change, named after the rule it trips
+# (at_ids_unique.md carries the one mechanically-forced second change: the
+# duplicate is a fourth row, so the Scenarios: count moves with it — every
+# existing id is cited from §0, so no row could be renamed instead).
 ERROR_RULE_FIXTURES = {
     "HEADER_STATUS": "header_status.md",
     "HEADER_OWNER": "header_owner.md",
@@ -39,15 +44,32 @@ ERROR_RULE_FIXTURES = {
     "HEADINGS_BARE": "headings_bare.md",
     "TLDR_BUDGET": "tldr_budget.md",
     "TLDR_FIELDS": "tldr_fields.md",
+    "RULES_PRESENT": "rules_present.md",
     "RULES_FORMAT": "rules_format.md",
     "RULES_TAGGED": "rules_tagged.md",
     "TAGS_RESOLVE": "tags_resolve.md",
     "AT_IDS_UNIQUE": "at_ids_unique.md",
+    "ACCEPTANCE_ALTITUDE": "acceptance_altitude.md",
     "SCENARIOS_COUNT": "scenarios_count.md",
     "WHY_LINE": "why_line.md",
     "UNTESTED_ON_AGREED": "untested_on_agreed.md",
     "PLACEHOLDER": "placeholder.md",
 }
+
+# One fixture per warn-severity rule: it fires as the ONLY finding, the run
+# exits 0 without --strict and 1 with it.
+WARN_RULE_FIXTURES = {
+    "AGENT_NOTES_MANY": "agent_notes_many.md",
+    "ALTITUDE_MISSING": "altitude_missing.md",
+    "HUMAN_HALF_BUDGET": "human_half_budget.md",
+}
+
+# Docs that are conforming.md plus one fenced code block whose contents look
+# like structure (a `## 0. TLDR`, a rule bullet, a `## 6.` heading, a table
+# row). Each must lint exactly like conforming.md: zero findings.
+FENCED_FIXTURES = ("fenced_tldr_before.md", "fenced_heading_in_s5.md")
+
+SECTION_SIGN_DIGRAPH = re.compile(r"\bSS\d")
 
 
 def run(script: Path, *args: str, cwd: str = None) -> subprocess.CompletedProcess:
@@ -143,26 +165,171 @@ class LintErrorRuleFixtureTests(unittest.TestCase):
         self.assertTrue(line.startswith(str(FIXTURES_DIR / "header_status.md")))
 
 
-class LintStrictPromotionTests(unittest.TestCase):
-    def setUp(self):
-        self.path = str(FIXTURES_DIR / "agent_notes_many.md")
+class LintWarnRuleFixtureTests(unittest.TestCase):
+    """Each warn fixture is conforming.md with exactly one change: the named
+    rule fires as a warning and as the ONLY finding; the run exits 0, and
+    --strict promotes it to an error and exits 1."""
+
+    def test_every_warn_rule_fixture_exists(self):
+        for rule, filename in WARN_RULE_FIXTURES.items():
+            self.assertTrue((FIXTURES_DIR / filename).is_file(), f"missing fixture for {rule}: {filename}")
 
     def test_warn_only_fixture_exits_zero_without_strict(self):
-        result = run(LINT, self.path, "--json")
-        data = json.loads(result.stdout)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(data["stats"]["errors"], 0)
-        self.assertGreaterEqual(data["stats"]["warnings"], 1)
-        self.assertTrue(any(f["rule"] == "AGENT_NOTES_MANY" for f in data["findings"]))
+        for rule, filename in WARN_RULE_FIXTURES.items():
+            with self.subTest(rule=rule, fixture=filename):
+                result = run(LINT, str(FIXTURES_DIR / filename), "--json")
+                data = json.loads(result.stdout)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(
+                    [(f["rule"], f["severity"]) for f in data["findings"]],
+                    [(rule, "warn")],
+                    f"{filename}: expected {rule} to be the only finding, got {data['findings']}",
+                )
+                self.assertEqual(data["stats"], {"errors": 0, "warnings": 1, "total": 1})
 
     def test_strict_promotes_warn_to_error_and_exits_one(self):
-        result = run(LINT, self.path, "--strict", "--json")
+        for rule, filename in WARN_RULE_FIXTURES.items():
+            with self.subTest(rule=rule, fixture=filename):
+                result = run(LINT, str(FIXTURES_DIR / filename), "--strict", "--json")
+                data = json.loads(result.stdout)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual([(f["rule"], f["severity"]) for f in data["findings"]], [(rule, "error")])
+                self.assertEqual(data["stats"]["errors"], data["stats"]["total"])
+
+    def test_human_half_budget_message_names_the_count_and_where_it_stopped(self):
+        result = run(LINT, str(FIXTURES_DIR / "human_half_budget.md"), "--json")
         data = json.loads(result.stdout)
+        message = data["findings"][0]["message"]
+        self.assertIn("(max 150)", message)
+        self.assertIn("through the first §3 example", message)
+
+    def test_altitude_missing_message_says_what_to_add(self):
+        result = run(LINT, str(FIXTURES_DIR / "altitude_missing.md"), "--json")
+        data = json.loads(result.stdout)
+        f = data["findings"][0]
+        self.assertEqual(f["line"], 78)  # the table's header row
+        self.assertIn("no Altitude column", f["message"])
+        for value in ("data", "response", "perception", "judgement", "sibling"):
+            self.assertIn(value, f["message"])
+
+
+class FencedBlocksAreIllustrationsTests(unittest.TestCase):
+    """A heading, field marker, rule bullet or table row inside a ``` / ~~~
+    fence is not structure: the lint, outcome_rows.py and the directory scan
+    all read past it."""
+
+    def test_fenced_fixtures_lint_exactly_like_conforming(self):
+        for filename in FENCED_FIXTURES:
+            with self.subTest(fixture=filename):
+                result = run(LINT, str(FIXTURES_DIR / filename), "--json")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["findings"], [])
+
+    def test_fenced_rule_and_table_row_are_not_extracted(self):
+        result = run(ROWS, str(FIXTURES_DIR / "fenced_tldr_before.md"), "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual([r["tags"] for r in data["rules"]], [["AT-1", "AT-2"], ["AT-3"], ["UNTESTED"]])
+        self.assertEqual([r["id"] for r in data["rows"]], ["AT-1", "AT-2", "AT-3"])
+        self.assertTrue(data["signal"].startswith("Ana mutes a busy channel"))
+
+    def test_fenced_heading_inside_s5_does_not_end_the_section(self):
+        # The fence in §5 carries a `## 6. Acceptance` line and a table row:
+        # neither a WHY_LINE for §5 nor an extra §6 row may come of it.
+        result = run(ROWS, str(FIXTURES_DIR / "fenced_heading_in_s5.md"), "--json")
+        data = json.loads(result.stdout)
+        self.assertEqual([r["id"] for r in data["rows"]], ["AT-1", "AT-2", "AT-3"])
+
+    def test_lint_and_orient_apply_the_same_fence_rule(self):
+        # The fence rule has two homes — lint_outcome.unfenced (used by
+        # outcome_rows.py and bridge_validate.py) and orient.unfenced (used
+        # by framework_section.py) — because orient imports no sibling.
+        # This guard is what keeps them from drifting: identical output on
+        # every fixture and on the hand-built edge cases.
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        try:
+            import lint_outcome
+            import orient
+        finally:
+            sys.path.pop(0)
+        cases = {}
+        for path in sorted(FIXTURES_DIR.rglob("*.md")):
+            try:
+                cases[str(path.relative_to(FIXTURES_DIR))] = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+        cases["~~~ fence"] = ["# T", "~~~", "## 0. TLDR", "~~~", "## 0. TLDR"]
+        cases["indented fence"] = ["# T", "   ```md", "## 0. TLDR", "  ```", "## 1. Problem"]
+        cases["unclosed fence"] = ["# T", "```", "## 0. TLDR", "| AT-1 | a | b | c |"]
+        cases["fence inside a fence"] = ["```", "```", "## 0. TLDR", "```", "## 6. Acceptance", "```"]
+        cases["mixed markers"] = ["```", "~~~", "## 0. TLDR", "```"]
+        self.assertGreater(len(cases), 60)
+        for name, lines in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(lint_outcome.unfenced(lines), orient.unfenced(lines))
+
+    def test_directory_scan_skips_a_framework_copy_in_docs_home_and_a_subfolder(self):
+        # The bundled framework shows the template shape only inside a fence
+        # (or not at all); copied into docsHome and docsHome/how-to — the
+        # example config's own layout — it must not be linted as a doc.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "how-to").mkdir()
+            framework_text = FRAMEWORK.read_text(encoding="utf-8")
+            (tmp_path / "outcome-framework.md").write_text(framework_text, encoding="utf-8")
+            (tmp_path / "how-to" / "outcome-framework.md").write_text(framework_text, encoding="utf-8")
+            (tmp_path / "real.md").write_text(
+                (FIXTURES_DIR / "fenced_tldr_before.md").read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            result = run(LINT, tmp, "--json")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual([os.path.basename(r["path"]) for r in data], ["real.md"])
+
+
+class SectionSignTests(unittest.TestCase):
+    """Findings, help text and the docstring print '§', never the digraph
+    'SS' (unidecode's transliteration of it)."""
+
+    def _assert_no_digraph(self, text: str, where: str) -> None:
+        hit = SECTION_SIGN_DIGRAPH.search(text)
+        self.assertIsNone(hit, f"{where}: found {hit.group(0) if hit else ''!r} in {text[:200]!r}")
+
+    def test_no_digraph_in_any_fixture_finding(self):
+        for path in sorted(FIXTURES_DIR.glob("*.md")) + sorted((FIXTURES_DIR / "lint-hardening").glob("*.md")):
+            result = run(LINT, str(path), "--json")
+            self._assert_no_digraph(result.stdout, path.name)
+
+    def test_no_digraph_in_help_or_source(self):
+        # Every script, not only the lint: outcome_rows.py and orient.py
+        # print section numbers too, and a source-level digraph would reach
+        # a message eventually.
+        scripts = sorted(SCRIPTS_DIR.glob("*.py"))
+        self.assertIn(LINT, scripts)
+        for path in scripts:
+            with self.subTest(script=path.name):
+                help_run = run(path, "-h")
+                self.assertEqual(help_run.returncode, 0, help_run.stderr)
+                self._assert_no_digraph(help_run.stdout, f"{path.name} -h")
+                self._assert_no_digraph(path.read_text(encoding="utf-8"), f"{path.name} source")
+
+    def test_scenarios_count_message_cites_the_section_sign(self):
+        result = run(LINT, str(FIXTURES_DIR / "scenarios_count.md"), "--json")
+        message = json.loads(result.stdout)["findings"][0]["message"]
+        self.assertIn("§6", message)
+
+    def test_findings_survive_a_stdout_that_cannot_encode_the_sign(self):
+        # A cp1252 pipe (the Windows default) cannot encode '§', '→' or '—':
+        # the run still prints every finding, degraded to '?', and exits 1
+        # on the finding rather than dying with UnicodeEncodeError.
+        env = dict(os.environ, PYTHONIOENCODING="ascii", PYTHONUTF8="0")
+        result = subprocess.run(
+            [sys.executable, str(LINT), str(FIXTURES_DIR / "scenarios_count.md")],
+            capture_output=True, text=True, env=env, encoding="ascii", errors="replace",
+        )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        agent_notes = [f for f in data["findings"] if f["rule"] == "AGENT_NOTES_MANY"]
-        self.assertTrue(agent_notes)
-        self.assertEqual(agent_notes[0]["severity"], "error")
-        self.assertEqual(data["stats"]["errors"], data["stats"]["total"])
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("SCENARIOS_COUNT", result.stdout)
 
 
 class LintUsageTests(unittest.TestCase):
@@ -182,13 +349,15 @@ class OutcomeRowsTests(unittest.TestCase):
 
         self.assertEqual(data["status"], "draft")
 
-        self.assertEqual(len(data["rules"]), 2)
+        self.assertEqual(len(data["rules"]), 3)
         self.assertEqual(data["rules"][0]["tags"], ["AT-1", "AT-2"])
-        self.assertEqual(data["rules"][1]["tags"], ["UNTESTED"])
+        self.assertEqual(data["rules"][1]["tags"], ["AT-3"])
+        self.assertEqual(data["rules"][2]["tags"], ["UNTESTED"])
         self.assertTrue(data["rules"][0]["text"].startswith("A muted channel"))
 
         self.assertEqual([r["id"] for r in data["rows"]], ["AT-1", "AT-2", "AT-3"])
         self.assertTrue(all(r["row"] is None for r in data["rows"]))
+        self.assertEqual([r["altitude"] for r in data["rows"]], ["perception"] * 3)
         self.assertEqual(data["rows"][0]["given"], "Ana is in a channel")
         self.assertEqual(data["rows"][0]["when"], "she mutes it")
         self.assertEqual(data["rows"][0]["then"], "she gets no push or badge from it")
@@ -257,9 +426,12 @@ class OrientEmptyDirTests(unittest.TestCase):
         result = run(ORIENT, "--cwd", self.cwd)
         self.assertEqual(result.stderr, "")
 
-    def test_mode_defaults_to_new(self):
+    def test_mode_is_null_without_the_flag(self):
+        # Phase 0 runs without --mode; the JSON must not claim a resolved
+        # mode it was never given (a `"new"` default read as the resolved
+        # mode on an arm run) — orient.py's --mode help states null.
         data = orientation_of(self.cwd)
-        self.assertEqual(data["mode"], "new")
+        self.assertIsNone(data["mode"])
 
     def test_mode_infer_for_unrecognised_word(self):
         data = orientation_of(self.cwd, mode="frobnicate")
@@ -330,7 +502,7 @@ class JsonValidityTests(unittest.TestCase):
             data = json.loads(result.stdout)
             self.assertEqual(
                 set(data.keys()),
-                {"configWritten", "configPath", "claudeMdWritten", "claudeMdPath", "changed", "dryRun"},
+                {"configWritten", "configPath", "claudeMdWritten", "claudeMdPath", "docsHome", "changed", "dryRun"},
             )
 
 
@@ -475,7 +647,7 @@ class AdoptTests(unittest.TestCase):
 class AdoptConfigShadowingTests(unittest.TestCase):
     """adopt.py must never write a second, higher-priority config when one
     is already loaded from the root promise.config.json fallback
-    (architecture.md SS6's own load order): a fresh `.claude/…` config
+    (architecture.md §6's own load order): a fresh `.claude/…` config
     with "map": null would silently shadow a real map underneath it."""
 
     def setUp(self) -> None:
@@ -487,8 +659,8 @@ class AdoptConfigShadowingTests(unittest.TestCase):
         root_config_path = Path(self.cwd) / "promise.config.json"
         root_map = {
             "recipe": "docs/testing/adding-a-capability.md",
-            "find": "pnpm capability:find",
-            "row": "pnpm capability:find --row",
+            "find": "scripts/capability-find",
+            "row": "scripts/capability-find --row",
             "lanes": {"data": "tests[]"},
         }
         root_config_path.write_text(
