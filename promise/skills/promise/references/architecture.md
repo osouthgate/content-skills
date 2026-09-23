@@ -308,6 +308,7 @@ Semantics the mode files rely on:
 | **verdict** | The row's honest proof state — `proven` / `under-proven` / `not-built` in the minimap; a project may keep its own enum. It moves only when evidence reaches the `Then`'s altitude. |
 | **kill mutation** | A production change, chosen before the test is trusted, that the cited test must fail on: applied, watched failing, reverted, watched passing (`references/altitude.md` § Kill mutation). |
 | **kill witness** | The record of a kill mutation a cited test was watched to catch. No watched kill, no promotion. |
+| **proof strength** | How much of a rule's cases the evidence checks: **example** (chosen cases), **property** (the real code on generated cases), **model** (every reachable state of a model, by machine-checked proof). Recorded on §4 invariants; a `model` proof needs a conformance test to reach the code (`references/altitude.md` § Proof strength). |
 | **signal** | §0's *how we'll know*: one of four kinds — a red→green test, a watched demo, a number in prod, a claim we can make to a customer. |
 | **slate** | A short list of candidate lines put to the human for the outcome line or the signal — never for a rule (`references/slates.md`). The human's edit enters, not the candidate. |
 | **recipe** | `map.recipe`: the project's own how-to for writing a row. The authority for mechanics; a mode reads it and works from the file, never restates it. |

@@ -153,11 +153,19 @@ framework exists to prevent. What each section must contain is in
 - **§4 Invariants** is where an invariants-analysis pass plugs in (a dedicated skill if
   you have one, manual otherwise): standing invariants of the touched area + new ones
   this work introduces, each as an "X must never Y" one-liner with its enforcement
-  point (constraint / test / file:line) or UNENFORCED, and, where the guarantee has an
-  edge, a one-line **boundary** — the condition beyond which it does not hold ("cannot
-  prevent X across two scopes; that is user error, not a violation"). An invariant
-  without a boundary claim overpromises. Four useful moves: the uniqueness claim,
-  two-concepts-one-knob, fail-open-or-closed, schema-wins.
+  point (constraint / test / property / proof / file:line) or UNENFORCED, and, where
+  the guarantee has an edge, a one-line **boundary** — the condition beyond which it
+  does not hold ("cannot prevent X across two scopes; that is user error, not a
+  violation"). An invariant without a boundary claim overpromises. Four useful moves:
+  the uniqueness claim, two-concepts-one-knob, fail-open-or-closed, schema-wins.
+  An enforcement point that is evidence also names its **proof strength** —
+  `example`, `property` or `model` (references/altitude.md § Proof strength): how many
+  of the cases the "never" covers the evidence actually checks. "Must never" is a claim
+  about every case; an invariant held only by `example` tests says so, so the reader
+  sees the gap rather than reading one or two cases as all of them. A `model` proof
+  (Lean, TLA+, any machine-checked proof) checks a model of the code, never the code
+  itself: it never enforces an invariant alone, and names the conformance test that
+  ties the model to the code.
 - **§5 Mechanism** carries file:line evidence for every current-state claim,
   reuse-first, and "existing primitive considered / why insufficient" for anything
   new — without mandatory tables and diagrams. Add a diagram only when it replaces
@@ -280,7 +288,10 @@ pack), the framework doubles as the review standard. A conforming review checks:
    a finding), invariants carry enforcement points or UNENFORCED, decisions have
    owners + blocking flags, disposition names what gets deleted, evidence paths
    resolvable by any reader.
-6. **Depth, not just shape** — invariants *argued* (mechanism + boundary), not listed;
+6. **Depth, not just shape** — invariants *argued* (mechanism + boundary), not listed,
+   and their proof strength named (an invariant held only by `example` tests states
+   that, rather than reading as proved for every case; a `model` proof names its
+   conformance test);
    evidence pinned to a commit; design-vs-description flagged wherever behavior doesn't
    exist yet; alternatives rejected with receipts. A doc can have every section present
    and still be shallow — shape checks alone won't catch it.
@@ -313,3 +324,4 @@ The framework eats its own dog food — a compact register of its load-bearing c
 | F5 | The outcome line is a forced choice on the same pattern as F4 — open question first, then a verbatim candidate slate (selected-because / commits-you-to / think-about), "none of these" never last, edits enter not candidates. Rules stay exempt: verbatim-confirm-only, never slated | F4 fixed the placeholder failure for one of §0's three fields and left the other two as blanks — the same argument applies to the outcome line; rules are excluded because a slate is itself a paraphrase offered as a menu, and picking from a menu of paraphrases ratifies whichever paraphrase reads closest, not the source — reintroducing the paraphrase loop at the exact spot the framework protects |
 | F6 | Revise mode gets an explicit procedure: only agent-maintained metadata (the `→ AT-n`/`→ UNTESTED` tag, the `Scenarios:` counts) changes inside §0 without asking; a rule's text, the outcome line, and how-we'll-know all require the human, every time. Agent notes sit below §0, exempt from its 40-line budget, but consolidate or promote past ~8 | Without a stated procedure, revise is the mode where §0 is most at risk — the doc already exists, so there's no interview protecting it; and an unbounded notes list quietly turns the front door into a discussion thread nobody reads in 60 seconds |
 | F7 | Where a project keeps a capability map, `agreed` is the doc's entry to the bridge and `arm` performs it as its first step on `feat/<slug>`: a human groups the confirmed §6 rows into the map's rows by the §0 rule each is tagged from — one row per story, 1–5 scenarios, more is a chain with a parent, rows no rule cites are one group the human places — and from then on the map is the source of the scenarios. §6 is a read-only snapshot, marked by the snapshot line under its table (§ Lifecycle), and its `Row` column cites the map's row id; §0 keeps citing the doc-local `AT-n` aliases, which stay stable and append-only rather than being replaced by the map's ids. `shipped` needs every bridged row proven at the altitude its own `Then` claims. No map ⇒ §6 stays the only home | One promise, one home — a copy made at `agreed` would drift the day after, the same failure the framework exists to prevent, just moved one level up |
+| F8 | Proof strength is a second axis beside altitude, recorded only on §4 invariants: `example` (chosen cases), `property` (the real code on generated cases), `model` (a machine-checked proof over every reachable state of a model). A proof counts only with no `sorry`, `admit` or unproved axiom left in it and a watched kill on the model; a `model` proof never enforces an invariant without a conformance test that runs the real code against the model. §6 rows, the map's lanes and the verdict rule are unchanged | Altitude says *what* a piece of evidence reaches; it never said *how much* of it. "Must never" is a claim about every case, and without the axis a test of two cases reads the same as a proof of all of them. A proof about a model is the strongest evidence of the three and the easiest to over-read, because the model is not the code: hence the conformance test, and hence the axis stays out of the verdict rule, which already guards the step from evidence to code |

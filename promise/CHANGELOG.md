@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.0
+
+Proof strength: a second axis beside altitude, for §4 invariants.
+
+- **Three strengths.** `example` (chosen cases), `property` (the real code on
+  generated cases), `model` (every reachable state of a model, by a machine-checked
+  proof such as Lean or an exhaustive TLA+ check). Altitude says what evidence reaches;
+  strength says how much of it. "Must never" is a claim about every case, and an
+  invariant held only by examples now says so. New section
+  `references/altitude.md` § Proof strength; framework decision F8.
+- **§4 enforcement points** gain `property` and `proof` beside constraint, test and
+  `file:line`, and name their strength when they are evidence — in the framework's
+  Section rules, the template and `new`. The review rubric's depth item checks it.
+- **A `model` proof never enforces an invariant alone.** It names a conformance test
+  that runs the real code against the model, because the model is a second copy of the
+  logic and can differ from the code while every theorem stays green.
+- **Red and kill rules carry over.** A proof with `sorry`, `admit` or an unchosen axiom
+  is red. The kill mutation is applied to the model (allow the forbidden transition,
+  watch the proof fail, revert); the positive control proves the protected state is
+  reachable.
+- §6 rows, map lanes, the verdict rule and every script are unchanged. Vocabulary
+  gains **proof strength**.
+
 ## 1.2.0
 
 The `outcome` plugin is removed from this repository; its framework lives on here.
