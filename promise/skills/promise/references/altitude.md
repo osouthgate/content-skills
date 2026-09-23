@@ -113,3 +113,42 @@ proving nothing.
 *not* appear, is *not* told, or does *not* happen needs a companion case proving the
 item *can* appear under different setup — otherwise the assertion may be passing
 because nothing could ever appear, not because the exclusion works.
+
+## Proof strength
+
+Altitude says *what* a piece of evidence reaches. Proof strength says *how much* of
+it: how many of the cases a rule covers the evidence actually checks. The two are
+independent — a `data`-altitude test can check two cases or ten thousand.
+
+| Strength | What it checks | Typical tool | What it does NOT prove |
+|---|---|---|---|
+| **example** | The cases someone chose and wrote down | Any ordinary test, e2e run or scored eval | Any case nobody wrote. Every lane holds this today |
+| **property** | The real code, on inputs generated to break the rule, many per run | A property-based test (fast-check, Hypothesis, QuickCheck) | Inputs the generator cannot produce. It is still a sample, a large and hostile one |
+| **model** | Every reachable state of a model of the code | A machine-checked proof (Lean) or an exhaustive model check (TLA+/TLC) | The code. The model is a second, hand-written copy of the logic, and can differ from the code while every theorem stays green |
+
+Proof strength is recorded on §4 invariants, beside the enforcement point
+(`outcome-framework.md` § Section rules). It does not change §6: a row's verdict still
+moves on altitude alone (§ The verdict rule), and a property test is cited in the same
+lane as any other test of its altitude.
+
+**A `model` proof never enforces an invariant alone.** It names a **conformance
+test**: a test at the invariant's own altitude that runs the real code and checks each
+step it takes against the model — every transition the code makes is one the model
+allows. Without it the honest entry is the proof plus UNENFORCED for the code, never
+the proof alone. Candidates are small state machines with a "must never" rule: a
+status lifecycle, a resume flow, a job queue. Anything at `perception` or `judgement`
+altitude is not; a model cannot state what a person sees or whether a model chose well.
+
+**A proof is red until nothing in it is assumed.** A Lean proof with `sorry` or
+`admit` left in it, or one that depends on an axiom the project did not choose
+(`#print axioms <theorem>` lists them), is a claim, not a proof — the same standing as
+a failing test at the red gate. A TLA+ run counts only with the state space it
+explored and no bound hit before it finished.
+
+**Kill the model, not the proof.** The kill mutation (§ Kill mutation) carries over:
+change the model the way a bug would change the code — allow the forbidden transition,
+drop the guard — and watch the proof fail; revert and watch it pass. A proof that
+survives every such change proves something weaker than it says, usually because a
+hypothesis is false or the model can never reach the state in question. That record is
+the proof's kill witness. The positive control carries over too: prove, once, that the
+state the rule protects is reachable at all.

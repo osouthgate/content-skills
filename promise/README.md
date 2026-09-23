@@ -121,10 +121,18 @@ optional. This is the whole config most projects need:
 A *capability map* is a project's own machine-checked register of promises and the
 tests that prove each one: one row per user story, 1–5 Given/When/Then scenarios,
 evidence arrays per test kind, and a verdict (`not-built` / `under-proven` /
-`proven`). **This plugin ships no map and no map tooling.** `find`, `row` and
-`nextId` below are commands *your* project supplies; the plugin only calls them,
-with the query as one argv element. To watch the bridge work before you have a map,
-[`examples/minimap/`](examples/minimap/) is a toy one — a `map.json`, a stdlib
+`proven`). Kept up, it is the map of the platform: what the product promises, and
+how much of that is proven today. The framework treats it as the goal. `find`,
+`row` and `nextId` below are commands your project's config names; the plugin
+only calls them, with the query as one argv element.
+
+**Starting one.** The skill ships a starter: an empty `map.json`, a stdlib reader
+(`capability_find.py`) and a recipe. `arm` offers it when your first doc is
+`agreed`, and `adopt` offers it when an agreed doc already exists; on your yes,
+`start_map.py` copies it into `docs/capabilities/` and fills the config's `map`.
+From then on the files are yours. A project that already keeps its own register
+points the config at that instead. To watch the bridge work before you have a map,
+[`examples/minimap/`](examples/minimap/) is a three-row one running the same reader — a `map.json`, a stdlib
 `capability_find.py`, a `promise.config.json` pointing at it and a `recipe.md` — that
 `arm`, `bridge_validate.py` and `adapter.py` can run against.
 
@@ -182,9 +190,9 @@ skills/promise/
   outcome-framework.md     the contract for the doc: section rules, lifecycle, rubric; points at the template
   modes/                   one file per mode, loaded only when that mode runs
   references/              architecture.md · slates.md · altitude.md · anti-rationalizations.md · config.md
-  templates/               outcome-doc.md · promise.config.example.json · claude-md-section.md
+  templates/               outcome-doc.md · promise.config.example.json · claude-md-section.md · starter-map/
   agents/                  openai.yaml — Codex skill metadata for the same skill
-  scripts/                 orient.py · lint_outcome.py · outcome_rows.py · adopt.py · adapter.py · render_outcome.py · framework_section.py · bridge_validate.py   (Python 3, stdlib only)
+  scripts/                 orient.py · lint_outcome.py · outcome_rows.py · adopt.py · adapter.py · render_outcome.py · framework_section.py · bridge_validate.py · start_map.py   (Python 3, stdlib only)
 examples/                  channel-muting.md (a lint-clean doc, not a fixture) · transcript.md (one annotated session) · minimap/ (a three-row capability map with its find/row/next-id script and config)
 tests/                     unit tests and one-change fixtures for the lint rules
 ```

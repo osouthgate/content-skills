@@ -54,8 +54,9 @@ observable — outcome.>
 *(agent derives, human confirms)*
 
 "X must never Y" one-liners. Each carries its enforcement point (constraint /
-test / file:line) or the flag UNENFORCED — and, where the guarantee has an
-edge, a one-line boundary: the condition beyond which it does not hold.
+test / property / proof / file:line) or the flag UNENFORCED — and, where the
+guarantee has an edge, a one-line boundary: the condition beyond which it does
+not hold. Evidence names its proof strength: example, property or model.
 Why — what breaks without it: <one line>
 
 ## 5. Mechanism

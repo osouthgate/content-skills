@@ -94,7 +94,9 @@ earlier one.
   yourself and say the four moves (uniqueness claim, two-concepts-one-knob,
   fail-open-or-closed, schema-wins) ran unassisted. Either way, §4 lands the
   same shape: standing + new invariants, one line each, enforcement point
-  (constraint / test / file:line) or **UNENFORCED**, plus a boundary line
+  (constraint / test / property / proof / file:line) or **UNENFORCED**, its
+  proof strength where the point is evidence (`example`, `property` or
+  `model`, `references/altitude.md` § Proof strength), plus a boundary line
   where the guarantee has an edge.
 - **§5 Mechanism:** reuse-first — anything new names the existing primitive
   considered and why it's insufficient. The project's own nouns only;
