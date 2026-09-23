@@ -1,6 +1,6 @@
 Read before this: references/config.md
 Phase 0 line: mode `adopt` (say if inferred), framework source, docs home and its source, `claudeMd.path` and `hasPromiseSection`, whether a config is loaded (and from where), whether a map is configured (orient's `mapUsable`), and `adopted`.
-Writes: `.claude/promise.config.json` (only if absent) and the `<!-- promise:begin -->…<!-- promise:end -->` section of `CLAUDE.md` (created if absent, else replaced in place) — both only through `scripts/adopt.py`, never by hand.
+Writes: `.claude/promise.config.json` (only if absent) and the `<!-- promise:begin -->…<!-- promise:end -->` section of `CLAUDE.md` (created if absent, else replaced in place) — both only through `scripts/adopt.py`, never by hand; and, when the human takes the starter-map option, the starter map and the config's `map` object, only through `scripts/start_map.py`.
 
 # Adopt — route the project through `/promise`
 
@@ -35,14 +35,24 @@ later `new` asks again.
 
 ## Decide whether to configure a map now
 
-- **(Recommended)** — leave `map` null. Right for any project with no
-  machine-checked register of promises yet; `intake` and `reconcile` work the docs
-  directly, and `map` can be configured later without re-adopting.
-- Configure it now. Correct only when the project already keeps its own
-  machine-checked register of promises and the tests that prove them. A map
-  counts as configured (orient's `mapUsable`) once `recipe`, `find`, `row` and
-  `lanes` are set; `nextId`, `checks`, `rowIdPattern` and `issueTracker` are
-  optional — `references/config.md` names every key.
+A capability map is where this project's promises add up: one row per story, the
+tests that prove it, an honest verdict — the map of the platform. The framework
+treats it as the goal (`outcome-framework.md` § Lifecycle); the only question here
+is when it starts. Read `existingDocs` from Phase 0, then put one of these first:
+
+- The project already keeps its own register of promises and the tests that prove
+  them → **(Recommended)** configure `map` to point at it after the script below
+  runs. A map counts as configured (orient's `mapUsable`) once `recipe`, `find`,
+  `row` and `lanes` are set; `nextId`, `checks`, `rowIdPattern` and `issueTracker`
+  are optional — `references/config.md` names every key.
+- Any doc in `existingDocs` is `agreed`, `building` or `shipped` → **(Recommended)**
+  start the starter map now, after the script below: show
+  `python3 "${CLAUDE_SKILL_DIR}/scripts/start_map.py" --dry-run`, and run it without
+  `--dry-run` on yes. Reason: the project already has a promise a human agreed,
+  and it has nowhere to be counted. Its rows are filed the next time `arm` or
+  `reconcile` touches the doc.
+- Otherwise → **(Recommended)** leave `map` null. `arm` offers the starter map when
+  the first doc is agreed, which is when there is a real promise to put in it.
 
 ## Run the script
 
@@ -75,5 +85,5 @@ true`.
 ## Close out
 
 Paste the inserted (or replaced) `CLAUDE.md` block verbatim. List the files
-written. Say what was left undone — most often, `map` still `null`, and what it
-would take to fill in.
+written. Say what was left undone — most often, `map` still `null`, and that `arm`
+will offer the starter map when the first doc is agreed.

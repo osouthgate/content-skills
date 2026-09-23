@@ -1,10 +1,13 @@
 # minimap — a capability map small enough to watch
 
-The promise plugin ships no capability map and no map tooling. A project that
-keeps one supplies three commands (`find`, `row`, `nextId`) and a recipe, and
-the plugin calls them. This directory is the smallest such project that works
-end to end, so `orient.py`, `adapter.py`, `bridge_validate.py` and `arm` can be
-watched doing the bridge instead of read about.
+A project that keeps a capability map names three commands (`find`, `row`,
+`nextId`) and a recipe in its config, and the plugin calls them. This directory
+is the smallest such project that works end to end, so `orient.py`,
+`adapter.py`, `bridge_validate.py` and `arm` can be watched doing the bridge
+instead of read about. Its `capability_find.py` is byte for byte the reader the
+skill's starter map ships (`skills/promise/templates/starter-map/`), which
+`start_map.py` installs into a project with an empty map; a test holds the two
+copies equal.
 
 | File | What it is |
 |---|---|

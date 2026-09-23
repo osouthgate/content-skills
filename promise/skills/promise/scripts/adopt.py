@@ -80,6 +80,14 @@ BUNDLED_FRAMEWORK_TEXT = "the copy bundled with the promise skill"
 UTF8_BOM = b"\xef\xbb\xbf"
 CONFIG_VERSION = 1
 VERIFY_COMMAND_KEYS = ("typeCheck", "test", "lint")
+# The comment a fresh config carries while map is null. start_map.py removes
+# it, and only it, when it fills the map in.
+NULL_MAP_COMMENT = (
+    "map is not configured yet. `/promise arm` offers to start one from the "
+    "skill's starter map (scripts/start_map.py) when the first doc is agreed; "
+    "references/config.md has the shape (recipe, index, find/row/nextId "
+    "commands, lanes, checks) for a map of your own."
+)
 
 
 class MalformedMarkersError(Exception):
@@ -166,11 +174,7 @@ def build_config(effective_docs_home: Optional[str], commands: Dict[str, Any]) -
     if any(command_fields.values()):
         config["commands"] = command_fields
     config["map"] = None
-    config["$comment"] = (
-        "map is not configured yet. See references/config.md for the shape "
-        "(recipe, index, find/row/nextId commands, lanes, checks) and fill "
-        "it in once this project has a capability map."
-    )
+    config["$comment"] = NULL_MAP_COMMENT
     return config
 
 

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "$comment": "This project's capability map: one row per user story, 1-5 scenarios each, four evidence arrays (data and response share tests[]; see recipe.md), and a verdict. Rows are appended in lockstep with the outcome doc that promises them; capability_find.py is the only reader. docRoot is the project root, relative to this file, so a row's doc is its project-relative path.",
+  "docRoot": "{docRoot}",
+  "rows": []
+}

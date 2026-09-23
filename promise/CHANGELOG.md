@@ -20,8 +20,32 @@ Proof strength: a second axis beside altitude, for §4 invariants.
   is red. The kill mutation is applied to the model (allow the forbidden transition,
   watch the proof fail, revert); the positive control proves the protected state is
   reachable.
-- §6 rows, map lanes, the verdict rule and every script are unchanged. Vocabulary
-  gains **proof strength**.
+- §6 rows, map lanes and the verdict rule are unchanged. Vocabulary gains
+  **proof strength**.
+
+The capability map becomes the goal, offered at the first agreed doc.
+
+- **A starter map ships with the skill.** `templates/starter-map/` holds an empty
+  `map.json`, its stdlib reader `capability_find.py` and a `recipe.md`. The new
+  `scripts/start_map.py` copies it into a project (`docs/capabilities` by default),
+  fills `{dir}` and `{docRoot}`, and writes the config's `map` object so `orient.py`
+  reports `mapUsable: true` straight after. It refuses, writing nothing, when there is
+  no config, when the config already has a `map` object (even a partial one), or when
+  the destination escapes the project or already holds files; `--dry-run` shows the
+  files and the config diff.
+- **`arm` offers it, Recommended,** when no map is configured and `map` is null, before
+  anything is filed; the files and the config ride the doc commit. **`adopt`**
+  recommends it when an agreed doc already exists, and otherwise leaves `map` null and
+  says `arm` will offer it. adopt's null-map `$comment` says so too; `start_map.py`
+  removes exactly that comment when it fills the map.
+- **The framework says why.** § Lifecycle gains "The capability map is the goal"; new
+  decision F9. `config.md`, the README, the architecture (tree, §13, §14, vocabulary)
+  and the example config stop saying the plugin ships no map.
+- **The reader gains `docRoot`.** `capability_find.py --check` resolves a row's `doc`
+  against the map's optional top-level `docRoot` (relative to the map, default `.`), so
+  a map in a subfolder cites docs by their project-relative path. `examples/minimap/`
+  runs the same file byte for byte; `tests/test_start_map.py` holds the two copies equal
+  and covers install, refusal and `docRoot`.
 
 ## 1.2.0
 

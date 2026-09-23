@@ -60,11 +60,17 @@ functionally identical to leaving the key out entirely.
 
 ### The `map` object
 
-Present only when the project keeps its own machine-checked register of promises.
-This plugin ships no map. `examples/minimap/` at the plugin root is a runnable
-stand-in — a small `map.json`, a stdlib `capability_find.py`, a `promise.config.json`
-pointing at it and a `recipe.md` — so `arm`, `adapter.py` and `bridge_validate.py`
-can be watched doing the bridge before a project writes its own.
+Present only when the project keeps a machine-checked register of promises — its
+own, or one started from the skill's starter. The starter is
+`templates/starter-map/` (an empty `map.json`, its stdlib reader
+`capability_find.py`, and a `recipe.md`); `scripts/start_map.py` copies it into the
+project (`docs/capabilities` unless `--dest` says otherwise) and writes this object
+for it. It refuses a config that already has a `map` object, writes nothing on
+`--dry-run` or a refusal, and after it the three files are the project's own.
+`arm` offers it when the first doc is agreed; `adopt` offers it when an agreed doc
+already exists (`outcome-framework.md` § Lifecycle, F9). `examples/minimap/` at the
+plugin root runs the same reader over three example rows, so `arm`, `adapter.py`
+and `bridge_validate.py` can be watched doing the bridge.
 
 **`map.recipe` is the authority for mechanics** — which files a row touches, what
 its lockstep rule means, what a citation looks like there. No mode file restates a

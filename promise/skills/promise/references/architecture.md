@@ -46,7 +46,7 @@ promise/                                  ← the plugin
     minimap/                              ← a tiny capability map: map.json, capability_find.py (find / --row / --next-id), promise.config.json, recipe.md, README.md, docs/designs/ with the bridged doc
   skills/promise/
     SKILL.md                              ← router. ≤ 150 lines. Frontmatter + contract summary + mode table + dispatch + Phase 0.
-    outcome-framework.md                  ← THE contract for the doc (contract, section rules, lifecycle, rubric, decisions F1–F7); the skeleton itself is templates/outcome-doc.md
+    outcome-framework.md                  ← THE contract for the doc (contract, section rules, lifecycle, rubric, decisions F1–F9); the skeleton itself is templates/outcome-doc.md
     modes/
       new.md        revise.md    review.md    merge.md
       arm.md        intake.md    reconcile.md    adopt.md
@@ -60,6 +60,7 @@ promise/                                  ← the plugin
       outcome-doc.md                      ← the §0–§10 skeleton, ONE canonical shape
       promise.config.example.json         ← every field, with comments in a sibling `$comment`; §6 shows it verbatim
       claude-md-section.md                ← the ≤20-line block `adopt` inserts into a project's CLAUDE.md (§13)
+      starter-map/                        ← map.json (no rows), capability_find.py (its reader; examples/minimap runs the same bytes), recipe.md — what start_map.py installs (§13)
     agents/
       openai.yaml                         ← Codex skill metadata (same skill, second host)
     scripts/                              ← Python 3, stdlib only (S5)
@@ -71,11 +72,12 @@ promise/                                  ← the plugin
       adapter.py                          ← run one configured command; the caller's text is one argv element, never a shell string (§14)
       render_outcome.py                   ← instantiate templates/outcome-doc.md; refuses to overwrite; makes the docs folder only with --create-docs-home
       bridge_validate.py                  ← a bridged doc's Row ids, snapshot line and Then text against the current map (§10)
+      start_map.py                        ← install templates/starter-map/ and fill the config's map object; never over an existing map (§13)
   tests/                                  ← `python3 -m unittest discover -s promise/tests` (§12)
     test_scripts.py  test_shape.py  test_lint_hardening.py  test_acceptance_columns.py
     test_status_authority.py  test_followups.py  test_intake_phrases.py
     test_adapter_render.py  test_orient_render.py  test_bridge_validate.py  test_examples.py
-    test_adopt_hardening.py  test_packaging.py
+    test_adopt_hardening.py  test_packaging.py  test_start_map.py
     fixtures/
       conforming.md + one-change violation docs      ← one fixture per lint rule
       lint-hardening/  acceptance-columns/  hardening/  ← per-rule violation families
@@ -239,7 +241,7 @@ kept byte-identical:
     "lint": "pnpm lint"
   },
   "map": {
-    "$comment": "Present only when this project keeps its own capability map — a machine-checked register of promises and the tests that prove them. This plugin ships none; examples/minimap/ in the plugin repository is a runnable stand-in. recipe is the authority for mechanics: read it, do not expect this skill to restate it. find/row/nextId and checks are argv lines, split and run with no shell (an argument is appended as one argv element) — no pipes, &&, env prefixes or cd; put such logic in a script and name it here. rowIdPattern validates any row id this skill writes or parses. lanes maps the four altitudes (plus sibling) to this project's own evidence-array names, so references/altitude.md can stay generic. checks run, in order, at the end of arm/intake/reconcile; the key is optional, but a project with no checks writes [] — with the key absent, adapter.py checks refuses (exit 2, 'map.checks is not configured'). issueTracker enables a duplicate-issue search before anything gets filed. A map counts as configured only with recipe, find, row and lanes (orient.py's mapUsable). Omit this whole object for a project with no map yet — see references/config.md 'Without a map'.",
+    "$comment": "Present only when this project keeps its own capability map — a machine-checked register of promises and the tests that prove them. Start one with scripts/start_map.py, which installs the skill's starter map (templates/starter-map/) and writes this object; examples/minimap/ in the plugin repository runs the same reader over example rows. recipe is the authority for mechanics: read it, do not expect this skill to restate it. find/row/nextId and checks are argv lines, split and run with no shell (an argument is appended as one argv element) — no pipes, &&, env prefixes or cd; put such logic in a script and name it here. rowIdPattern validates any row id this skill writes or parses. lanes maps the four altitudes (plus sibling) to this project's own evidence-array names, so references/altitude.md can stay generic. checks run, in order, at the end of arm/intake/reconcile; the key is optional, but a project with no checks writes [] — with the key absent, adapter.py checks refuses (exit 2, 'map.checks is not configured'). issueTracker enables a duplicate-issue search before anything gets filed. A map counts as configured only with recipe, find, row and lanes (orient.py's mapUsable). Omit this whole object for a project with no map yet — see references/config.md 'Without a map'.",
     "recipe": "docs/how-to/adding-a-capability.md",
     "index": "docs/how-to/capability-map-index.md",
     "find": "scripts/capability-find",
@@ -300,7 +302,7 @@ Semantics the mode files rely on:
 |---|---|
 | **promise** | Something a person will be able to do, stated so it can be checked. An outcome doc makes one; a row keeps or breaks one. |
 | **outcome doc** | The one document per capability in the Outcome Framework shape. |
-| **capability map / map** | A project's machine-checked register of promises and their proof. Optional; configured in §6. |
+| **capability map / map** | A project's machine-checked register of promises and their proof — the map of the platform. The goal state (F9): `arm` offers a starter when the first doc is agreed; configured in §6. |
 | **row** | One entry in the map: a user story plus 1–5 Gherkin scenarios, evidence arrays, a verdict. Ids follow `map.rowIdPattern`. |
 | **AT-n** | A doc-local acceptance-row id in §6. Stable, append-only. After the bridge it is an alias for a row's scenario, never a second copy. |
 | **altitude** | What a `Then` asserts on: **data** (a stored fact), **response** (what a request returns), **perception** (what a person sees, is told, lands on), **judgement** (whether a model chose well) — plus **sibling**, a `Then` that only a sibling system's own tests can prove. §6's `Altitude` column carries one of the five. |
@@ -546,8 +548,8 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/adopt.py" [--cwd <path>] [--dry-run] [--doc
   written only when at least one command was detected, then with all three keys, an
   undetected one as `null`, so the pinning is visible in the file — with nothing detected
   the object is omitted so detection stays on),
-  and `"map": null` with a sibling `$comment` saying what to fill in and pointing at
-  `references/config.md`. It never overwrites an existing config, and says so. It does not
+  and `"map": null` with a sibling `$comment` naming the starter map
+  (`start_map.py`) that `arm` will offer, and pointing at `references/config.md`. It never overwrites an existing config, and says so. It does not
   create the docs folder: `--docs-home` records the user's choice, and the folder is made at
   the first `new`, on the user's explicit say-so (`render_outcome.py --create-docs-home`).
 - **CLAUDE.md section**: renders `templates/claude-md-section.md` with `{docsHome}`,
@@ -577,6 +579,25 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/adopt.py" [--cwd <path>] [--dry-run] [--doc
   `docsHome` says so on stderr. Prints one JSON object on stdout:
   `{"configWritten": bool, "configPath": "…", "claudeMdWritten": bool, "claudeMdPath": "…", "docsHome": "docs/designs or null", "changed": bool, "dryRun": bool}`.
 
+### `start_map.py` — the starter capability map
+
+```
+python3 "${CLAUDE_SKILL_DIR}/scripts/start_map.py" [--cwd <path>] [--dest <folder>] [--dry-run]
+```
+
+Copies `templates/starter-map/` into `--dest` (default `docs/capabilities`), filling
+`{dir}` in the recipe with the destination and `{docRoot}` in `map.json` with the path
+back to the project root, so a row's `doc` is its project-relative path. Then sets the
+loaded config's `map` object — `recipe`, `find`, `row`, `nextId`, `rowIdPattern`
+(`^CAP-\d+$`), `lanes` and `checks`, every command an argv line run from the project
+root — and drops the top-level `$comment` only when it is `adopt.py`'s own "map is not
+configured yet" note. Refuses, exit 2, writing nothing: no loaded config (adopt
+first); a config whose `map` is already an object; a `--dest` that escapes the project,
+is `.`, holds a space, or already holds files. `--dry-run` prints the files and the
+config diff to stderr. One JSON object on stdout:
+`{"dest": "…", "configPath": "…", "files": […], "filesWritten": […], "configWritten": bool, "changed": bool, "dryRun": bool}`.
+`arm` and `adopt` offer it; neither runs it without the human's yes to the dry run.
+
 The `adopt` mode confirms the docs home and the config contents with the user
 (Recommended-first, one reason), runs the script, then runs `orient.py` and shows `adopted` is
 now true. Every other mode offers `adopt` once per session when Phase 0 reports the project
@@ -584,8 +605,8 @@ is not adopted, and continues with the requested mode either way.
 
 ## 14. Scripts that exist, and scripts that are planned
 
-Shipped (the eight in §3): `orient.py` (§5), `lint_outcome.py` (§9), `outcome_rows.py`
-(§10), `adopt.py` (§13), `framework_section.py`, `adapter.py` (runs every configured
+Shipped (the nine in §3): `orient.py` (§5), `lint_outcome.py` (§9), `outcome_rows.py`
+(§10), `adopt.py` and `start_map.py` (§13), `framework_section.py`, `adapter.py` (runs every configured
 command with the user's text as one argument — never a composed shell string; `find
 --query-file` reads the query from a file; `verify --only <op>` narrows the verify run;
 refuses when `mapUsable` is false),

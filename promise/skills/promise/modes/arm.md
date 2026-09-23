@@ -1,7 +1,7 @@
 Read before this: outcome-framework.md § Lifecycle · references/altitude.md · references/anti-rationalizations.md
 Read at the bridge step: the project's `map.recipe`, if a map is configured.
 Phase 0 line: mode `arm` (say if inferred), framework source, docs home and its source, the doc's `Status`, the count of unresolved BLOCKING §9 questions, whether the lint passes, whether a map is configured (orient's `mapUsable`), and whether the project is adopted.
-Writes: a `feat/<capability>` branch, red tests, §6 (failing output), the header (`Red gate:` line) and `Status:` in the doc, committed by explicit path as the branch's second commit; with a map, also each group's not-built row per the recipe and the §6 `Row` column.
+Writes: a `feat/<capability>` branch, red tests, §6 (failing output), the header (`Red gate:` line) and `Status:` in the doc, committed by explicit path as the branch's second commit; with a map, also each group's not-built row per the recipe and the §6 `Row` column; when the human takes the starter-map offer, also the three starter files and the config's `map` object.
 
 # Arm — `agreed → building`
 
@@ -28,6 +28,30 @@ say so and ask before continuing — a branch cut from the wrong base is the use
 call, not this mode's guess. Show `git status --short` before and after. Every
 edit below — map rows, §6, the header — lands on `feat/<slug>`, never on the
 branch you started from.
+
+## No map yet — offer the starter
+
+When no map is configured (orient's `mapUsable` is false) **and** the config's
+`map` is `null` or absent, offer once, on `feat/<slug>`, before anything is filed:
+
+- **(Recommended)** — start the project's capability map now, from the skill's
+  starter. Reason: this doc is a promise a human has just agreed, and the map is
+  where the project's promises add up — one row per story, each naming the tests
+  that prove it, with an honest verdict — so the platform's map starts with its
+  first real promise, not on the day of adoption.
+- Arm without a map. §6 stays the only home of these rows; `arm` can offer again
+  on the next agreed doc.
+
+Show `python3 "${CLAUDE_SKILL_DIR}/scripts/start_map.py" --dry-run` (the three
+files and the config diff it prints; `--dest <folder>` if the human wants another
+home than `docs/capabilities`). On yes, run it without `--dry-run`, then re-run
+`orient.py` and confirm `mapUsable` is true. The dry run printed every command the
+new map configures, so that yes is also the session's yes for running them (SKILL.md
+Phase 0). Then carry on with the bridge below, with the map just started.
+
+A config whose `map` is an object, even an incomplete one, is the project's own map
+in progress: never offer the starter over it (`start_map.py` refuses it too) — say
+which keys are missing, per orient's warnings, and arm without a map.
 
 ## The bridge, with a map
 
@@ -112,7 +136,9 @@ and `bridge_validate.py` does not run.
    and ask the human to confirm the gate; on yes, write `building`. This is the
    only status this skill writes, and the commit the human approved is the act
    it records — say so in the close-out. `agreed` and `shipped` stay human-typed.
-6. **Commit the doc — and, with a map, the recipe's row files — by explicit path**,
+6. **Commit the doc — and, with a map, the recipe's row files, plus the three
+   starter files and the promise config when this run started the map — by
+   explicit path**,
    as the branch's second commit: `docs(<scope>): arm <capability> — building`.
    Show `git status --short` after it. Anything else the tree now shows (a
    lockfile, `node_modules/`, a cache) came from the project's own commands; name
