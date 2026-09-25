@@ -1,6 +1,6 @@
 {
   "name": "promise",
-  "description": "Write the promise before the build, then prove it kept. An outcome doc records the human's outcome line, rules and success signal verbatim in a protected §0 TLDR; the agent derives invariants, mechanism with file:line evidence, Given/When/Then acceptance rows (each tagged with the altitude its Then asserts on) and build phases; a linter checks the shape; `arm` commits the rows as failing tests before anything is built and records the commit in the doc; `reconcile` updates the doc when work lands. Where a project also keeps a machine-checked capability map, once a human marks the doc `agreed`, `arm` files the rows into it, `intake` routes feedback onto existing promises instead of new documents, and `reconcile` moves a row's verdict only when the evidence reaches the altitude its own Then claims. Eight modes behind one thin router, mode files loaded on demand, Python scripts (stdlib only) for orientation, shape linting and row extraction, and a per-project config instead of a fork. The outcome plugin was removed in promise 1.2.0; its framework lives on here.",
+  "description": "Write the promise before the build, then prove it kept. You write the outcome and rules in your own words, the model may argue in notes but never rewrite them, a linter checks the doc, and your acceptance rows are committed as failing tests before any code is written.",
   "version": "1.4.0",
   "author": {
     "name": "Oliver Southgate",

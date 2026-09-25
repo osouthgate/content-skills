@@ -19,7 +19,11 @@ The thin draft: start a promise with less.
 - **`revise` fills a thin draft** once the human half is complete, with `new`'s
   agent-half steps, and removes the line. `arm` names the thin line as a
   precondition.
-- README: a "Why promise" section with a one-line and a thirty-second explanation.
+- README: rewritten for a first-time reader. The one-line pitch and the install
+  command come first, then the four-step path, then the §0 example. A "Why
+  promise" section explains the name. The capability map is one optional
+  paragraph, and the word list keeps the seven core terms.
+- The plugin and marketplace description is two sentences.
 
 ## 1.3.0
 

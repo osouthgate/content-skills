@@ -1,9 +1,39 @@
 # promise
 
-A Claude Code skill that makes the human's decisions the read-only input to a plan,
-commits the plan's acceptance rows as failing tests before anything is built, and
-updates the plan when the work lands. The model may argue with your decisions in
-numbered notes underneath them; it may not rewrite them.
+**A spec says what we will build. A promise says what we will make true for users,
+and how we will prove it.**
+
+`promise` is a Claude Code skill for teams that ship with coding agents. You write
+the outcome and the rules in your own words. The model may argue with them in
+numbered notes, but it may not rewrite them. Before any code is written, your
+acceptance rows become failing tests, committed on their own. When the work lands,
+the doc says which rules are now proven.
+
+```bash
+claude plugin marketplace add osouthgate/content-skills
+claude plugin install promise@content-skills
+/promise <an idea, a ticket, or a pasted transcript>
+```
+
+## The smallest useful path
+
+No config and no project setup. Four steps:
+
+1. `/promise <an idea, a ticket, or a pasted transcript>` — the model interviews you
+   (what is true after this ships; why; what must always or never be true; how we'll
+   know; one concrete example), then writes one doc at `Status: draft`. Only the
+   first answer is required: with less, you get a thin draft (below).
+2. You read §0, the short block at the top of the doc. It should be specific enough
+   that you *could* disagree with it; when you don't, edit `Status:` to `agreed`.
+   The model never types `agreed`.
+3. `/promise arm <doc>` — the model branches, writes the acceptance rows as failing
+   tests, commits only those test files, records `Red gate: <sha> <date>` in the
+   header, and — after you have seen the red output and said yes — writes
+   `Status: building`.
+4. Build it. When the work lands, `/promise reconcile <PR>` re-stamps which rules
+   are now tested and logs the decision. You type `shipped`.
+
+## What you read
 
 This is the part of a doc a founder reads in sixty seconds and can disagree with:
 
@@ -31,25 +61,6 @@ is allowed at `draft` and is a lint error once a human marks the doc `agreed`. T
 whole doc this block opens is [`examples/channel-muting.md`](examples/channel-muting.md);
 what a session looks like on screen is [`examples/transcript.md`](examples/transcript.md).
 
-## Why "promise"
-
-An outcome doc *makes* a promise; a proven row *keeps* it; a defect *breaks* it.
-A promise has an owner, a person it is made to, and a result you can check. A
-spec, an intent or a plan does not have all three.
-
-- **One line:** a spec says what we will build; a promise says what we will make
-  true for users, and how we will prove it.
-- **Thirty seconds:** each feature starts as a promise in plain words — "a muted
-  channel never sends a notification". The AI cannot change those words; it can
-  only argue with them in notes. Before the build, the promise becomes failing
-  tests. When they pass, the promise is kept. When a bug appears, you know which
-  promise it broke.
-- **Against an `intent.md`:** an intent records what you want; a promise records
-  what you commit to and how you will prove it. A thin draft (below) is the intent
-  stage of a promise.
-
-Engineers may hear a JavaScript `Promise`; say "a promise to users" the first time.
-
 ## Start thin
 
 You do not need every answer to start. When you have the outcome line but not yet
@@ -62,23 +73,19 @@ A thin draft cannot be agreed: the lint rejects `Depth: thin` on any status past
 `draft` (`THIN_DRAFT`). When the questions have answers, `/promise revise <doc>`
 writes the agent half and removes the line. The gates after that are unchanged.
 
-## The smallest useful path
+## Why "promise"
 
-No config, no project setup, and no capability map (a project's own register of
-promises and their proof — optional, defined below; most projects have none). Four
-steps:
+An outcome doc *makes* a promise; a proven row *keeps* it; a defect *breaks* it.
+A promise has an owner, a person it is made to, and a result you can check. A
+spec, an intent or a plan does not have all three.
 
-1. `/promise <an idea, a ticket, or a pasted transcript>` — the model interviews you
-   (what is true after this ships; why; what must always or never be true; how we'll
-   know; one concrete example), then writes one doc at `Status: draft`. Only the
-   first answer is required: with less, you get a thin draft (above).
-2. You read §0. It should be specific enough that you *could* disagree with it; when
-   you don't, edit `Status:` to `agreed`. The model never types `agreed`.
-3. `/promise arm <doc>` — the model branches, writes the §6 rows as failing tests,
-   commits only those test files, records `Red gate: <sha> <date>` in the header, and
-   — after you have seen the red output and said yes — writes `Status: building`.
-4. Build it. When the work lands, `/promise reconcile <PR>` re-stamps which rules
-   are now tested and logs the decision. You type `shipped`.
+Each feature starts as a promise in plain words — "a muted channel never sends a
+notification". The model cannot change those words; it can only argue with them in
+notes. Before the build, the promise becomes failing tests. When they pass, the
+promise is kept. When a bug appears, you know which promise it broke.
+
+An `intent.md` records what you want; a promise records what you commit to and how
+you will prove it. A thin draft is the intent stage of a promise.
 
 ## What a script checks, and what is an instruction to the model
 
@@ -149,58 +156,22 @@ optional. This is the whole config most projects need:
 }
 ```
 
-## If your project keeps a capability map
+## Optional: a capability map
 
-A *capability map* is a project's own machine-checked register of promises and the
-tests that prove each one: one row per user story, 1–5 Given/When/Then scenarios,
-evidence arrays per test kind, and a verdict (`not-built` / `under-proven` /
-`proven`). Kept up, it is the map of the platform: what the product promises, and
-how much of that is proven today. The framework treats it as the goal. `find`,
-`row` and `nextId` below are commands your project's config names; the plugin
-only calls them, with the query as one argv element.
-
-**Starting one.** The skill ships a starter: an empty `map.json`, a stdlib reader
-(`capability_find.py`) and a recipe. `arm` offers it when your first doc is
-`agreed`, and `adopt` offers it when an agreed doc already exists; on your yes,
-`start_map.py` copies it into `docs/capabilities/` and fills the config's `map`.
-From then on the files are yours. A project that already keeps its own register
-points the config at that instead. To watch the bridge work before you have a map,
-[`examples/minimap/`](examples/minimap/) is a three-row one running the same reader — a `map.json`, a stdlib
-`capability_find.py`, a `promise.config.json` pointing at it and a `recipe.md` — that
-`arm`, `bridge_validate.py` and `adapter.py` can run against.
-
-With a map configured, `arm` also files the §6 rows as not-built rows (one map row
-per group of 1–5 §6 rows, keyed by §0 rule) and §6 cites the row ids; `intake`
-matches feedback against map rows; `reconcile` promotes a row only when the new
-evidence reaches the altitude its `Then` claims (a database assertion never proves a
-`Then` that says "I see…") and only after a mutation was watched to make the cited
-test fail.
-
-```json
-"map": {
-  "recipe": "docs/how-to/adding-a-capability.md",
-  "find": "scripts/capability-find",
-  "row": "scripts/capability-find --row",
-  "nextId": "scripts/capability-find --next-id",
-  "rowIdPattern": "^CAP-\\d+$",
-  "lanes": { "data": "tests[]", "response": "tests[]", "perception": "e2eTests[]", "judgement": "evalTests[]", "sibling": "siblingTests[]" }
-}
-```
-
-| Doc status | Without a map | With a map |
-|---|---|---|
-| `draft` | The doc is the only home of the promise | Same |
-| `agreed` (human) | No extra step; the doc stays the only home | `arm` files the §6 rows as not-built rows; §6 cites them |
-| `building` | Red tests committed first, failing output in §6, `Red gate: <sha> <date>` in the header | Same, each test cited in the lane its altitude picks |
-| `shipped` (human) | When the rows are green | When every bridged row is proven at its `Then`'s altitude |
-
-`bridge_validate.py` is the staleness check between the two after `agreed`: Row ids,
-the snapshot line under §6, and each row's `Then` against the map's current text.
+Most projects need none of this. A *capability map* is a project's own
+machine-checked register of promises and the tests that prove each one, with a
+verdict per row (`not-built` / `under-proven` / `proven`): what the product
+promises, and how much of that is proven today. `arm` offers a starter map when
+your first doc is `agreed`. With a map, `arm` files the acceptance rows into it,
+`intake` routes feedback onto existing rows, and `reconcile` moves a row's verdict
+only when the new evidence reaches the altitude its `Then` claims, after a mutation
+was watched to make the cited test fail. [`examples/minimap/`](examples/minimap/) is
+a three-row map you can run the bridge against.
 
 Full contract: [`references/config.md`](skills/promise/references/config.md).
 Design of the skill itself: [`references/architecture.md`](skills/promise/references/architecture.md).
 
-## Eleven words
+## Seven words
 
 | Word | Meaning |
 |---|---|
@@ -208,13 +179,9 @@ Design of the skill itself: [`references/architecture.md`](skills/promise/refere
 | **§0** | Its protected human block: outcome line, rules, how-we'll-know, scenario count. ≤ 40 lines. |
 | **AT-n** | A doc-local acceptance-row id in §6. Stable, append-only. |
 | **red gate** | The commit that contains only the failing tests; its sha in the header is what `building` records. |
-| **capability map / row** | A project's own register of promises and proof; one row = one story + scenarios + evidence + verdict. Optional. |
 | **altitude** | What a `Then` asserts on — `data`, `response`, `perception`, `judgement`, or `sibling` for a claim about another capability — and therefore the only kind of test that can prove it. |
-| **lane** | The kind of test that reaches an altitude, and the evidence array it is cited in (`map.lanes.<altitude>`). |
-| **recipe** | `map.recipe`: the project's own how-to for adding a row. The authority for mechanics; the modes read it and never restate it. |
-| **snapshot line** | The one line under a bridged §6 table (`Snapshot taken at …`) after which §6 is not edited; the map is the source from there. |
-| **kill witness** | A mutation the cited test was watched to catch (a killed mutant, recorded by hand until `kill_witness.py` ships). |
 | **thin draft** | A `draft` with `Depth: thin`: the human half only, each gap a BLOCKING question. It cannot be agreed; `revise` fills it. |
+| **capability map** | A project's own register of promises and proof. Optional; the map terms (row, lane, recipe, snapshot line, kill witness) are in [`references/architecture.md`](skills/promise/references/architecture.md) § Vocabulary. |
 
 ## What's in the box
 
@@ -266,7 +233,7 @@ skills/promise/templates/outcome-doc.md` is how the bundled template itself is l
 claude plugin marketplace add osouthgate/content-skills
 claude plugin install promise@content-skills
 # in a project:
-/promise adopt                            # config + CLAUDE.md section
+/promise adopt                            # optional: config + CLAUDE.md section
 /promise <idea, ticket, or transcript>    # first outcome doc
 ```
 
@@ -291,10 +258,6 @@ block is read-only to the model and it may only append notes; rules are never
 offered as a pick-list, because a menu of paraphrases is still a paraphrase; and a
 row's verdict moves only when evidence reaches the altitude the `Then` sentence was
 written at.
-
-The `outcome` plugin was removed in promise 1.2.0; its framework lives on here.
-
-That is the name: see [Why "promise"](#why-promise).
 
 ## License
 
