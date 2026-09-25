@@ -1,0 +1,4 @@
+interface:
+  display_name: "Podcast Transcript"
+  short_description: "Turn podcast episodes into Markdown transcripts"
+  default_prompt: "Use $podcast-transcript to transcribe this podcast episode into Markdown."

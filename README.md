@@ -15,6 +15,7 @@ Install from Claude Code:
 ```bash
 claude plugin marketplace add osouthgate/content-skills
 claude plugin install youtube-transcript@content-skills
+claude plugin install podcast-transcript@content-skills
 claude plugin install supergoal@content-skills
 claude plugin install autonomous-run@content-skills
 claude plugin install promise@content-skills
@@ -26,6 +27,7 @@ Codex / Cursor: `promise` works on both — copy or symlink `promise/skills/prom
 ## Plugins
 
 - `youtube-transcript` - Extract YouTube captions/transcripts, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable.
+- `podcast-transcript` - Extract podcast transcripts from Spotify episode links, Apple Podcasts episode links, public RSS feeds, direct transcript/audio URLs, and local media; save clean Markdown and metadata, with optional summaries. Spotify is used only as an episode identifier — audio always comes from the publisher's public RSS feed, never Spotify's stream.
 - `supergoal` - Plan and autonomously build a software task end-to-end under a single `/goal`, with retry, fix-spec recovery, per-phase memory writeback, and a final audit. Capability-aware: on Claude Code it fans independent phases out to parallel subagents and self-verifies end-to-end against any web/mobile/service surface; on Codex it runs the same plan sequentially. Cross-platform (PowerShell + POSIX helpers). Adapted for Windows from [supergoal](https://github.com/robzilla1738/supergoal) by Robert Courson (MIT; see `supergoal/NOTICE.md`).
 - `autonomous-run` - Set the operating posture for a long unattended run on Claude Code: auto permissions, dynamic-workflow subagent fan-out, `/goal` or `/loop` persistence, cloud execution, and end-to-end self-verification. Detects which levers are available and hands off cleanly. Pairs with `supergoal` (which owns planning + phase execution); `autonomous-run` owns whether the session can run for hours without a human.
 - `promise` - Write the promise before the build, then prove it kept. One outcome doc per capability: the human's outcome line, rules and success signal verbatim in a protected §0 TLDR; the agent derives invariants, mechanism with file:line evidence, Given/When/Then acceptance rows and build phases. A linter checks the shape, `arm` commits the rows as failing tests before anything is built, `reconcile` updates the doc when work lands, and where a project keeps a capability map, `intake` and `reconcile` work against the map's rows. Eight modes behind one router, Python scripts (stdlib only), per-project config. See [`promise/README.md`](promise/README.md).
