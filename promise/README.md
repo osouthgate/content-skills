@@ -31,6 +31,37 @@ is allowed at `draft` and is a lint error once a human marks the doc `agreed`. T
 whole doc this block opens is [`examples/channel-muting.md`](examples/channel-muting.md);
 what a session looks like on screen is [`examples/transcript.md`](examples/transcript.md).
 
+## Why "promise"
+
+An outcome doc *makes* a promise; a proven row *keeps* it; a defect *breaks* it.
+A promise has an owner, a person it is made to, and a result you can check. A
+spec, an intent or a plan does not have all three.
+
+- **One line:** a spec says what we will build; a promise says what we will make
+  true for users, and how we will prove it.
+- **Thirty seconds:** each feature starts as a promise in plain words — "a muted
+  channel never sends a notification". The AI cannot change those words; it can
+  only argue with them in notes. Before the build, the promise becomes failing
+  tests. When they pass, the promise is kept. When a bug appears, you know which
+  promise it broke.
+- **Against an `intent.md`:** an intent records what you want; a promise records
+  what you commit to and how you will prove it. A thin draft (below) is the intent
+  stage of a promise.
+
+Engineers may hear a JavaScript `Promise`; say "a promise to users" the first time.
+
+## Start thin
+
+You do not need every answer to start. When you have the outcome line but not yet
+the rules, the signal or an example, `/promise` offers a **thin draft**: `Status:
+draft` with `Depth: thin` in the header, §0–§2 in your own words, and §3–§7 marked
+"not written yet". Each gap becomes a BLOCKING question in §9, never a line the
+model wrote for you. The idea is in version control the same day.
+
+A thin draft cannot be agreed: the lint rejects `Depth: thin` on any status past
+`draft` (`THIN_DRAFT`). When the questions have answers, `/promise revise <doc>`
+writes the agent half and removes the line. The gates after that are unchanged.
+
 ## The smallest useful path
 
 No config, no project setup, and no capability map (a project's own register of
@@ -39,7 +70,8 @@ steps:
 
 1. `/promise <an idea, a ticket, or a pasted transcript>` — the model interviews you
    (what is true after this ships; why; what must always or never be true; how we'll
-   know; one concrete example), then writes one doc at `Status: draft`.
+   know; one concrete example), then writes one doc at `Status: draft`. Only the
+   first answer is required: with less, you get a thin draft (above).
 2. You read §0. It should be specific enough that you *could* disagree with it; when
    you don't, edit `Status:` to `agreed`. The model never types `agreed`.
 3. `/promise arm <doc>` — the model branches, writes the §6 rows as failing tests,
@@ -53,6 +85,7 @@ steps:
 | Enforced by a script (deterministic, exit code) | Where |
 |---|---|
 | Doc shape: header, headings, §0 budget, rule format and tags, tag resolution, scenario counts, why-lines, placeholders, `UNTESTED` on `agreed` | `lint_outcome.py` (stable rule ids; one-change fixtures under `tests/fixtures/`) |
+| A thin draft (`Depth: thin`) stays a `draft`; past `draft` the full shape applies | `lint_outcome.py THIN_DRAFT` |
 | Every §6 row names the altitude its `Then` asserts on: `data`, `response`, `perception`, `judgement` or `sibling` | `lint_outcome.py ACCEPTANCE_ALTITUDE`; a table with no `Altitude` column is `ALTITUDE_MISSING`, a warning, so older docs keep linting |
 | A `building` doc carries a `Red gate: <sha> <YYYY-MM-DD>` line of the right shape | `lint_outcome.py BUILDING_NEEDS_GATE` |
 | A bridged doc's `Row` ids, snapshot line and `Then` text against the map's current text (a bridged doc is one whose §6 rows `arm` has filed into a map) | `bridge_validate.py` |
@@ -86,8 +119,8 @@ the second table.
 
 | Invocation | What it does |
 |---|---|
-| `/promise <idea, ticket, transcript>` | **new** — interview first, then one outcome doc at `draft` |
-| `/promise revise <doc> <change>` | **revise** — evolve a doc; §0 changes go through the human, with the status consequence stated first |
+| `/promise <idea, ticket, transcript>` | **new** — interview first, then one outcome doc at `draft` (a thin draft when only the outcome line is known) |
+| `/promise revise <doc> <change>` | **revise** — evolve a doc; §0 changes go through the human, with the status consequence stated first; fills a thin draft's agent half |
 | `/promise review <doc or paste>` | **review** — apply the framework as a code-verified rubric to a doc authored elsewhere; paste-ready findings |
 | `/promise merge <docs…>` | **merge** — one doc per capability: fold siblings into a survivor, delete the rest, with the user's yes |
 | `/promise arm <doc>` | **arm** — `agreed → building`: commit the §6 rows as failing tests first and record the red gate in the doc; with a map, also file them as not-built rows and cite each test in its lane |
@@ -167,7 +200,7 @@ the snapshot line under §6, and each row's `Then` against the map's current tex
 Full contract: [`references/config.md`](skills/promise/references/config.md).
 Design of the skill itself: [`references/architecture.md`](skills/promise/references/architecture.md).
 
-## Ten words
+## Eleven words
 
 | Word | Meaning |
 |---|---|
@@ -181,6 +214,7 @@ Design of the skill itself: [`references/architecture.md`](skills/promise/refere
 | **recipe** | `map.recipe`: the project's own how-to for adding a row. The authority for mechanics; the modes read it and never restate it. |
 | **snapshot line** | The one line under a bridged §6 table (`Snapshot taken at …`) after which §6 is not edited; the map is the source from there. |
 | **kill witness** | A mutation the cited test was watched to catch (a killed mutant, recorded by hand until `kill_witness.py` ships). |
+| **thin draft** | A `draft` with `Depth: thin`: the human half only, each gap a BLOCKING question. It cannot be agreed; `revise` fills it. |
 
 ## What's in the box
 
@@ -213,6 +247,7 @@ python3 skills/promise/scripts/lint_outcome.py --template skills/promise/templat
 python3 skills/promise/scripts/adopt.py --dry-run                                     # the config + CLAUDE.md section it would write, as a diff
 python3 skills/promise/scripts/adapter.py show                                        # the configured project commands; runs nothing
 python3 skills/promise/scripts/render_outcome.py --title "Export a channel" --owner Ana --docs-home docs/designs --dry-run   # a new doc from the template, printed, nothing written
+python3 skills/promise/scripts/render_outcome.py --title "Export a channel" --owner Ana --docs-home docs/designs --dry-run --thin   # the same, as a thin draft
 python3 skills/promise/scripts/bridge_validate.py tests/fixtures/conforming.md --json # the bridge's staleness check (NOT_BRIDGED on a draft)
 (cd .. && python3 -m unittest discover -s promise/tests -v)                           # the test suite, stdlib only
 ```
@@ -259,8 +294,7 @@ written at.
 
 The `outcome` plugin was removed in promise 1.2.0; its framework lives on here.
 
-An outcome doc *makes* a promise; a proven row *keeps* it; a defect *breaks* it.
-That is the name.
+That is the name: see [Why "promise"](#why-promise).
 
 ## License
 

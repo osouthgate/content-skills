@@ -54,6 +54,7 @@ ERROR_RULE_FIXTURES = {
     "WHY_LINE": "why_line.md",
     "UNTESTED_ON_AGREED": "untested_on_agreed.md",
     "PLACEHOLDER": "placeholder.md",
+    "THIN_DRAFT": "thin_draft.md",
 }
 
 # One fixture per warn-severity rule: it fires as the ONLY finding, the run

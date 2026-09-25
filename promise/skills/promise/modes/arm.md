@@ -8,6 +8,8 @@ Writes: a `feat/<capability>` branch, red tests, §6 (failing output), the heade
 ## Preconditions
 
 - `Status:` is `agreed`.
+- No `Depth: thin` line: a thin draft is filled with `revise` first (the
+  lint reports it as `THIN_DRAFT`).
 - Zero unresolved BLOCKING questions in §9. The lint does not check the
   BLOCKING count — read §9 yourself.
 - `scripts/lint_outcome.py` passes on the doc (the lint checks shape, not

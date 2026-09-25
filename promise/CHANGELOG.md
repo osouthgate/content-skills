@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.0
+
+The thin draft: start a promise with less.
+
+- **`Depth: thin`.** A `draft` doc can now hold the human half only: §0–§2, §8–§10
+  and any seed example, with §3–§7 marked "not written yet". `new` offers it,
+  Recommended, when the outcome line is known but the rules, the signal or an
+  example are not. Each gap is a BLOCKING §9 question, never text the model wrote
+  for the human. Rules stay verbatim-confirmed. Framework decision F10.
+- **`render_outcome.py --thin`** writes the shape: the `Depth: thin` line, one rule
+  slot tagged `→ UNTESTED`, zero `Scenarios:` counts.
+- **New lint rule `THIN_DRAFT`** (error): a `Depth:` line must read `Depth: thin`,
+  and only on a `draft`. On a thin draft the lint does not require the §6 table or
+  the §4–§7 Why lines, counts an empty §3 as zero, and reports an empty rules block
+  as a warning. Past `draft` every rule applies in full, so a thin doc cannot be
+  agreed or armed.
+- **`revise` fills a thin draft** once the human half is complete, with `new`'s
+  agent-half steps, and removes the line. `arm` names the thin line as a
+  precondition.
+- README: a "Why promise" section with a one-line and a thirty-second explanation.
+
 ## 1.3.0
 
 Proof strength: a second axis beside altitude, for §4 invariants.

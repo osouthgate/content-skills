@@ -24,6 +24,17 @@ change through `intake` or `reconcile` instead. A `Then` cell edited here
 drifts from the map silently, and `bridge_validate.py` reports that drift
 as `THEN_NOT_IN_MAP` with the map as the suspect.
 
+## Filling a thin draft
+
+The doc has `Depth: thin` (a `draft` with the human half only; modes/new.md
+§ Thin draft). The agent half is written here, on request. First check the
+human half: an outcome line, at least one confirmed rule, a decided
+how-we'll-know and one seed example. Anything missing → ask for it the way
+`new` does, and keep the doc thin until it is there; say which part is
+missing. When it is all there, follow modes/new.md § Draft the agent half
+for §3–§7, then delete the `Depth: thin` line in the same edit. Log the
+fill in §8 with a date.
+
 ## What requires the human, every time
 
 The §0 outcome line, any rule's text, and how-we'll-know. Adding a rule,

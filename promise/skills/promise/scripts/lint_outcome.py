@@ -23,7 +23,12 @@ angle-bracket ``<...>`` run in §0, in the header ``Owner:``/``Last
 decision:`` values, in a §6 data cell, in an agent note, on a §3
 example's first line, in a §9 owner, or in a Why line's value), and
 status authority (rule id BUILDING_NEEDS_GATE: a ``building`` doc's
-header carries no red-gate commit sha). ``--template`` exempts
+header carries no red-gate commit sha), and the thin draft (rule id
+THIN_DRAFT: a ``Depth:`` header line must read ``Depth: thin`` and sits
+only on a ``draft`` doc). A thin draft holds the human half only, so on
+one the lint does not require the §6 table or the §4-§7 Why lines,
+counts a §3 with no parseable example as zero, and reports an empty
+**Rules:** block as a warning, not an error. ``--template`` exempts
 angle-bracket placeholders and the literal ``YYYY-MM-DD`` so the bundled
 template itself can be linted; every other rule stays active under it.
 Lines inside a fenced code block (``` or ~~~) are illustrations: no
@@ -90,6 +95,7 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 HEADING_RE = re.compile(r"^## (\d+)\.\s*(.*?)\s*$")
 ANY_HEADING_RE = re.compile(r"^## \d+\.")
 STATUS_RE = re.compile(r"^Status:\s*(\S+)")
+DEPTH_RE = re.compile(r"^Depth:\s*(\S*)")
 BULLET_START_RE = re.compile(r"^-\s+(.*)$")
 NUMBERED_START_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 TAG_RE = re.compile(r"→\s*(UNTESTED|AT-\d+(?:\s*,\s*AT-\d+)*)\s*$")
@@ -207,6 +213,23 @@ def get_status(lines: List[str]) -> Optional[str]:
     if idx is None:
         return None
     return STATUS_RE.match(scan[idx]).group(1)
+
+
+def get_depth(lines: List[str]) -> Optional[str]:
+    """The ``Depth:`` header token ("" when the line is bare), or None when
+    there is no such line."""
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: DEPTH_RE.match(l) is not None)
+    if idx is None:
+        return None
+    return DEPTH_RE.match(scan[idx]).group(1)
+
+
+def is_thin(lines: List[str]) -> bool:
+    """True for a thin draft: ``Depth: thin`` on a ``draft`` doc. A
+    ``Depth: thin`` line on any other status is THIN_DRAFT's error, and the
+    doc is then held to the full shape."""
+    return get_depth(lines) == "thin" and get_status(lines) == "draft"
 
 
 def parse_header_field_value(
@@ -659,6 +682,39 @@ def check_header_status(lines: List[str]) -> List[Dict[str, Any]]:
     return []
 
 
+def check_thin_draft(lines: List[str]) -> List[Dict[str, Any]]:
+    """THIN_DRAFT (error): a ``Depth:`` line reads anything but ``thin``, or
+    a thin doc's status is not ``draft``. A thin draft has no acceptance rows
+    to test, so it cannot be agreed; the agent half is written and the line
+    removed first."""
+    scan = unfenced(lines)
+    idx = find_line_index(scan, lambda l: DEPTH_RE.match(l) is not None)
+    if idx is None:
+        return []
+    depth = DEPTH_RE.match(scan[idx]).group(1)
+    if depth != "thin":
+        return [
+            finding(
+                "THIN_DRAFT",
+                idx + 1,
+                f"Depth: token {depth!r} is not 'thin' (a full doc has no Depth: line)",
+                "error",
+            )
+        ]
+    status = get_status(lines)
+    if status != "draft":
+        return [
+            finding(
+                "THIN_DRAFT",
+                idx + 1,
+                f"Depth: thin on a doc whose Status: is {status}; write §3-§7 and remove "
+                "the Depth: line before the doc leaves draft",
+                "error",
+            )
+        ]
+    return []
+
+
 def check_header_owner(lines: List[str]) -> List[Dict[str, Any]]:
     scan = unfenced(lines)
     out = []
@@ -813,12 +869,14 @@ def check_rules_present(lines: List[str]) -> List[Dict[str, Any]]:
     records, rules_idx, _ = parse_rules_block(lines)
     if rules_idx is None or records or find_stray_rule_lines(lines):
         return []
+    # A thin draft may start before the human can state a rule; the gap is
+    # a warning there, and a BLOCKING §9 question carries it.
     return [
         finding(
             "RULES_PRESENT",
             rules_idx + 1,
             "**Rules:** has no rule bullets (at least one '- ' rule is required)",
-            "error",
+            "warn" if is_thin(lines) else "error",
         )
     ]
 
@@ -913,6 +971,10 @@ def check_acceptance_table(lines: List[str]) -> List[Dict[str, Any]]:
     start, end = bounds
     tables = find_acceptance_tables(lines, start + 1, end)  # every candidate, qualifying or not
     if not tables:
+        if is_thin(lines):
+            # A thin draft has no acceptance rows yet; a table it does
+            # carry is still checked in full below.
+            return []
         return [
             finding(
                 "ACCEPTANCE_TABLE",
@@ -1103,6 +1165,9 @@ def check_scenarios_count(lines: List[str]) -> List[Dict[str, Any]]:
             )
         )
     ranges, kind = worked_examples(lines)
+    if kind is None and is_thin(lines):
+        # A thin §3 holds no example until the human seeds one: count zero.
+        ranges, kind = [], "thin"
     if kind is None:
         out.append(
             finding(
@@ -1146,6 +1211,9 @@ def check_why_line(lines: List[str]) -> List[Dict[str, Any]]:
     carries a value. An angle-bracket value (``<one line>``) is a
     placeholder, reported by PLACEHOLDER rather than here, so the template
     lints under ``--template`` and a raw render reports each slot once."""
+    if is_thin(lines):
+        # §4-§7 are not written yet on a thin draft.
+        return []
     out = []
     for n in WHY_SECTIONS:
         bounds = section_bounds(lines, n)
@@ -1459,6 +1527,7 @@ def check_unclosed_fence(lines: List[str]) -> List[Dict[str, Any]]:
 RULE_CHECKS = (
     check_unclosed_fence,
     check_header_status,
+    check_thin_draft,
     check_header_owner,
     check_contents_line,
     check_headings_bare,
