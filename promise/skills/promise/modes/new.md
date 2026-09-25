@@ -46,9 +46,13 @@ Problem, §2 Outcome, and one seed worked example — framework § The contract
   half stays pending, and you re-surface the *open remainder* compactly
   (never the full sheet again) at the next natural decision point. Only
   drafting a NEW doc's agent half waits on the human half.
-- Can't yet state the outcome or rules? Stop. That's the finding — the
-  capability isn't ready for a doc. Offer to help think it through
+- Can't yet state the outcome line, even from a slate? Stop. That's the
+  finding — there is nothing to promise yet. Offer to help think it through
   conversationally; write nothing to `docsHome`.
+- Outcome line confirmed, but no rules, no signal or no example yet, or the
+  user asks to "just capture it"? Offer a **thin draft** — § Thin draft
+  below — **(Recommended)**, with one reason: the idea is in version control
+  today, and the gaps are BLOCKING questions, not guesses.
 
 ## Capability hunt — one doc per capability
 
@@ -70,6 +74,31 @@ for the same capability.
   folder they named with `--create-docs-home` below. `adopt` can pin the folder in
   the config on the user's say-so, but it is still created here, on the first
   write. Never create one unprompted.
+
+## Thin draft — the human half only
+
+A thin draft is a `draft` doc with `Depth: thin` in its header. It holds §0,
+§1, §2, §8–§10 and any seed example; §3–§7 each hold one "not written yet"
+line. It is the intent stage of a promise: a place to start, never a place
+to agree.
+
+- The capability hunt above runs first, the same as for a full doc.
+- Render with `render_outcome.py ... --thin`. It adds the `Depth: thin` line,
+  one rule slot tagged `→ UNTESTED`, and zero counts on the `Scenarios:` line.
+- **§0 rules stay verbatim-confirmed.** Each confirmed rule is tagged
+  `→ UNTESTED`. No confirmed rule → remove the slot and add a BLOCKING §9
+  question that asks for the rules. The lint reports the empty block as a
+  warning on a thin draft only.
+- **How-we'll-know is never guessed.** Not decided → write `Open — Qn
+  (BLOCKING).` as its value and add that question to §9.
+- §1 and §2 take the user's own words; mark what they did not say as a §9
+  question, not as text you wrote for them.
+- A seed example the user gave goes in §3, and the `Scenarios:` count moves
+  with it. Do not extend it; do not draft §4–§7.
+- Close out as § Close out at draft says, and add: the doc is thin, which
+  §9 questions block the full doc, and that `/promise revise <doc>` writes
+  the agent half once they have answers. A thin draft cannot be agreed —
+  the lint's `THIN_DRAFT` rule rejects `Depth: thin` past `draft`.
 
 ## Draft the agent half
 

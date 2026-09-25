@@ -70,14 +70,14 @@ promise/                                  ← the plugin
       adopt.py                            ← write the config and the CLAUDE.md section, idempotently (§13)
       framework_section.py                ← print named `## ` sections of the resolved framework; modes read sections, not the file
       adapter.py                          ← run one configured command; the caller's text is one argv element, never a shell string (§14)
-      render_outcome.py                   ← instantiate templates/outcome-doc.md; refuses to overwrite; makes the docs folder only with --create-docs-home
+      render_outcome.py                   ← instantiate templates/outcome-doc.md (--thin: the human half only); refuses to overwrite; makes the docs folder only with --create-docs-home
       bridge_validate.py                  ← a bridged doc's Row ids, snapshot line and Then text against the current map (§10)
       start_map.py                        ← install templates/starter-map/ and fill the config's map object; never over an existing map (§13)
   tests/                                  ← `python3 -m unittest discover -s promise/tests` (§12)
     test_scripts.py  test_shape.py  test_lint_hardening.py  test_acceptance_columns.py
     test_status_authority.py  test_followups.py  test_intake_phrases.py
     test_adapter_render.py  test_orient_render.py  test_bridge_validate.py  test_examples.py
-    test_adopt_hardening.py  test_packaging.py  test_start_map.py
+    test_adopt_hardening.py  test_packaging.py  test_start_map.py  test_thin_draft.py
     fixtures/
       conforming.md + one-change violation docs      ← one fixture per lint rule
       lint-hardening/  acceptance-columns/  hardening/  ← per-rule violation families
@@ -318,6 +318,7 @@ Semantics the mode files rely on:
 | **ratchet** | A checker's floor or ceiling that only tightens — a coverage count, a citation-strength threshold. Loosening one to make a check pass is never a fix. |
 | **red gate** | The commit that contains only the failing tests for a doc's §6 rows. Its sha and date sit in the header as `Red gate: <sha> <YYYY-MM-DD>`; that line is what `building` records. |
 | **snapshot line** | The one line under a bridged doc's §6 table — `` Snapshot taken at `agreed` on <YYYY-MM-DD>; the map is the source of these scenarios from here on. `` — after which §6 is not edited. `bridge_validate.py` requires it. |
+| **thin draft** | A `draft` doc with `Depth: thin` in its header: the human half only, §3–§7 not written yet, each gap a BLOCKING §9 question. It cannot be agreed (`THIN_DRAFT`); `revise` fills it. |
 | **confirmation sheet** | The one-screen summary of the human half — outcome line, rules, signal, example — put to the user for approval before anything is written (`references/slates.md` § The confirmation sheet). |
 
 ## 8. The bridge — doc status × map
@@ -357,13 +358,14 @@ though the lines still count toward a line budget; an unclosed fence is its own 
 | Rule id | Checks | Severity |
 |---|---|---|
 | `HEADER_STATUS` | A `Status:` line exists and its first token is one of `draft` `agreed` `building` `shipped` `superseded-by`; `superseded-by` names a target. Other text after the token is allowed. | error |
+| `THIN_DRAFT` | A `Depth:` header line reads exactly `Depth: thin`, and only on a `draft` doc. A thin draft holds the human half only: on one, `ACCEPTANCE_TABLE` does not require a table (a table that is there is checked in full), `WHY_LINE` does not run, `SCENARIOS_COUNT` counts a §3 with no parseable example as zero, and `RULES_PRESENT` is a warning. Past `draft` the line is this error and every rule applies in full, so a thin doc cannot be agreed. | error |
 | `HEADER_OWNER` | `Owner:` and `Last decision:` present, with non-empty values. | error |
 | `CONTENTS_LINE` | A `Contents:` line exists and links to all eleven anchors `#0-tldr` … `#10-out-of-scope`. | error |
 | `HEADINGS_BARE` | Exactly one `## <n>. <Name>` per n in 0..10, matching the template's names, with nothing after the name on that line. | error |
 | `TLDR_BUDGET` | Lines from `## 0. TLDR` up to (not including) the `Agent notes` line — or `## 1.` if there are none — number ≤ 40. Report the count. | error |
 | `TLDR_FIELDS` | The block contains `**Outcome:**`, `**Rules:**`, `**How we'll know:**`, `**Scenarios:**`, and the Outcome and How-we'll-know values are non-empty. `**How we'll know:**` with a curly apostrophe (U+2019) is the same marker. The rules block ends at the next bold `**Field:**` line, the next `## ` heading or the end of §0 — never end-of-file — so a missing marker is one finding, not a cascade. | error |
 | `RULES_FORMAT` | Every rule is a `- ` bullet with text before its tag. Numbered rules, and any other non-blank text in the rules block, are findings. | error |
-| `RULES_PRESENT` | `**Rules:**` is present but has no `- ` rule bullet under it, at every status. A block holding only stray text is `RULES_FORMAT`'s and does not also fire this. | error |
+| `RULES_PRESENT` | `**Rules:**` is present but has no `- ` rule bullet under it, at every status. A block holding only stray text is `RULES_FORMAT`'s and does not also fire this. On a thin draft (`THIN_DRAFT`) it is a warning. | error / warn |
 | `RULES_TAGGED` | Every rule ends with `→ AT-n[, AT-m…]` or `→ UNTESTED`. | error |
 | `TAGS_RESOLVE` | Every `AT-n` cited in a §0 tag exists as a row id in §6. | error |
 | `AT_IDS_UNIQUE` | §6 row ids are unique and match `AT-\d+`. | error |
@@ -518,6 +520,10 @@ third-party packages. The suites, one file each:
 - `test_adopt_hardening.py` — `adopt.py`'s refusals (a wrong-typed path, a hostile
   `--docs-home`, a non-UTF-8 `CLAUDE.md`), symlink and file-mode preservation,
   `"version": 1`, the all-or-nothing `commands` object.
+- `test_thin_draft.py` — the thin draft: the filled fixture lints clean, `Depth: thin` past
+  `draft` is `THIN_DRAFT` and brings back the full shape, an empty rules block is a warning
+  only there, a §6 table and the `Scenarios:` claim are still checked, and
+  `render_outcome.py --thin` writes the shape.
 - `test_packaging.py` — the pre-install surfaces agree with the plugin: the marketplace
   description equals `plugin.json`'s, every mode count equals the number of mode files,
   `plugin.json`'s version equals the top CHANGELOG entry.

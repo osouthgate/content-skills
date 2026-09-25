@@ -195,6 +195,17 @@ STATUS_TRANSITION_ALLOWLIST: Dict[str, str] = {
     "- A doc in `draft` with unresolved BLOCKING questions cannot move to "
     "`agreed`.": "negated",
 
+    "`lint_outcome.py` accepts the shape on a `draft` only (`THIN_DRAFT`), "
+    "so a thin doc cannot be agreed; `revise` writes the agent half and "
+    "removes the line.": "negated",
+
+    "| F10 | A thin draft (`Depth: thin`) holds the human half only, and is a "
+    "`draft` that cannot be agreed | A doc that asks for rules, a signal and "
+    "a worked example before it is written stops the ideas that most need a "
+    "home; a thin draft takes the idea as it is and turns each gap into a "
+    "BLOCKING question, and the lint keeps it out of `agreed`, so the checks "
+    "at every gate stay as strict as before |": "negated",
+
     "Write the new row id into the `Row` column of each §6 line it "
     "covers, adding the column between `Altitude` and the table's edge if "
     "the doc has none, and add one line under the §6 table: `Snapshot taken at "

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render a new outcome doc from the template, with the header fields filled in.
 
-    python3 render_outcome.py --title "<Capability>" --owner "<name>" [--date YYYY-MM-DD] [--docs-home DIR] [--create-docs-home] [--slug NAME] [--cwd DIR] [--dry-run] [--json]
+    python3 render_outcome.py --title "<Capability>" --owner "<name>" [--date YYYY-MM-DD] [--docs-home DIR] [--create-docs-home] [--slug NAME] [--thin] [--cwd DIR] [--dry-run] [--json]
 
 Copies ``templates/outcome-doc.md`` — found relative to this script's own
 directory, not the current working directory — and fills in exactly four
@@ -12,6 +12,13 @@ Every other placeholder in the template — the outcome line, each rule,
 worked examples, section 9's own unrelated ``<name>`` in its owner
 example — is left exactly as the template wrote it; the interview that
 follows this script fills those in by hand.
+
+``--thin`` renders a thin draft: the human half only. It adds a
+``Depth: thin`` header line under ``Supersedes:``, leaves one ``§0`` rule
+slot tagged ``→ UNTESTED``, sets the ``Scenarios:`` line to zero rows and
+zero examples, and replaces the body of §3-§7 with one line that says the
+section is not written yet. The lint accepts that shape only while the
+doc is ``draft``.
 
 ``--title`` and ``--owner`` must be non-blank single lines: a newline in
 either would split the header, so it is refused. ``--date`` defaults to
@@ -112,6 +119,47 @@ def render_template(text: str, title: str, owner: str, date: str) -> str:
     return "\n".join(lines)
 
 
+THIN_SECTIONS = ("## 3.", "## 4.", "## 5.", "## 6.", "## 7.")
+THIN_PENDING_LINE = "*Not written yet: this is a thin draft. Run `/promise revise` on this doc to write it.*"
+
+
+def thin_template(text: str) -> str:
+    """The template cut down to a thin draft (see ``--thin``).
+
+    Each of §3-§7 keeps its heading and its role line and loses the rest of
+    its body to ``THIN_PENDING_LINE``; §0 keeps one rule slot, tagged
+    UNTESTED, and counts zero scenarios."""
+    out: List[str] = []
+    skipping = False
+    rule_kept = False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            skipping = False
+            out.append(line)
+            if line.startswith(THIN_SECTIONS):
+                skipping = True
+                out.append("__ROLE__")
+            continue
+        if skipping:
+            if out[-1] == "__ROLE__" and line.startswith("*("):
+                out[-1] = line
+                out.extend(["", THIN_PENDING_LINE, ""])
+            continue
+        if line.startswith("Supersedes:"):
+            out.extend([line, "Depth: thin"])
+            continue
+        if line.startswith("- <rule"):
+            if not rule_kept:
+                out.append("- <rule — one line, stated as a fact, verbatim>  → UNTESTED")
+                rule_kept = True
+            continue
+        if line.startswith("**Scenarios:**"):
+            out.append("**Scenarios:** 0 acceptance rows (§6), 0 worked examples (§3).")
+            continue
+        out.append(line)
+    return "\n".join(l for l in out if l != "__ROLE__")
+
+
 def resolve_docs_home(cwd: str, docs_home_arg: Optional[str]) -> Optional[str]:
     """``--docs-home`` wins outright; otherwise ask ``orient.py`` to resolve one."""
     if docs_home_arg:
@@ -140,6 +188,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--slug", default=None, help="the file name (without .md) instead of one derived from --title; must be slug-form"
+    )
+    parser.add_argument(
+        "--thin", action="store_true", help="render a thin draft: the human half only, §3-§7 not written yet"
     )
     parser.add_argument("--cwd", default=None, help="project root (default: current directory)")
     parser.add_argument("--dry-run", action="store_true", help="print the rendered text; write and create nothing")
@@ -208,6 +259,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _refuse(f"{dest_path} already exists; refusing to overwrite")
 
     date = args.date or datetime.date.today().isoformat()
+    if args.thin:
+        template_text = thin_template(template_text)
     rendered = render_template(template_text, args.title, args.owner, date)
 
     written = False
