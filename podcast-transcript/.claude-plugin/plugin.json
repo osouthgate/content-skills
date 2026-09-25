@@ -1,0 +1,23 @@
+{
+  "name": "podcast-transcript",
+  "description": "Extract podcast transcripts from Spotify episode links, Apple Podcasts episode links, public RSS feeds, direct transcript/audio URLs, and local media; save clean Markdown and metadata, with optional summaries.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "podcast",
+    "spotify",
+    "apple podcasts",
+    "transcript",
+    "rss",
+    "audio",
+    "summarization",
+    "openai",
+    "ollama"
+  ]
+}

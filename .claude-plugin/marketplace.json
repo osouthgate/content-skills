@@ -5,14 +5,19 @@
     "url": "https://github.com/osouthgate"
   },
   "metadata": {
-    "description": "Content and workflow plugins for Claude Code: YouTube transcript extraction and summarization (youtube-transcript), autonomous planning and unattended execution (supergoal, autonomous-run), and outcome docs carried from intent to proof (promise).",
-    "version": "0.2.0"
+    "description": "Content and workflow plugins for Claude Code: YouTube and podcast transcript extraction and summarization (youtube-transcript, podcast-transcript), autonomous planning and unattended execution (supergoal, autonomous-run), and outcome docs carried from intent to proof (promise).",
+    "version": "0.3.0"
   },
   "plugins": [
     {
       "name": "youtube-transcript",
       "source": "./youtube-transcript",
       "description": "Extract YouTube captions/transcripts, transcribe local audio/video files, summarize transcript files, and fall back to OpenAI audio transcription when captions are unavailable."
+    },
+    {
+      "name": "podcast-transcript",
+      "source": "./podcast-transcript",
+      "description": "Extract podcast transcripts from Spotify episode links, Apple Podcasts episode links, public RSS feeds, direct transcript/audio URLs, and local media; save clean Markdown and metadata, with optional summaries."
     },
     {
       "name": "supergoal",
