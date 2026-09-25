@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Content and workflow plugins for Claude Code: YouTube and podcast transcript extraction and summarization (youtube-transcript, podcast-transcript), autonomous planning and unattended execution (supergoal, autonomous-run), and outcome docs carried from intent to proof (promise).",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
@@ -31,7 +31,10 @@
     },
     {
       "name": "promise",
-      "source": "./promise",
+      "source": {
+        "source": "github",
+        "repo": "osouthgate/promise"
+      },
       "description": "Write the promise before the build, then prove it kept. You write the outcome and rules in your own words, the model may argue in notes but never rewrite them, a linter checks the doc, and your acceptance rows are committed as failing tests before any code is written."
     }
   ]
