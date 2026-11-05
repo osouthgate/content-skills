@@ -1,0 +1,4 @@
+interface:
+  display_name: "Handoff to Agent"
+  short_description: "Hand a session off to another agent harness"
+  default_prompt: "Use $handoff-to-agent to summarize this session and hand it off to another agent."
