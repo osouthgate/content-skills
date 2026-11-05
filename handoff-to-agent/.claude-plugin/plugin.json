@@ -1,0 +1,22 @@
+{
+  "name": "handoff-to-agent",
+  "description": "Cross-harness session handoff: write a handoff document summarizing the session and remaining work, print a paste-ready first-move prompt, then optionally spawn the target agent (cursor/agent, claude, codex, agy) in Herdr after confirmation.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": [
+    "handoff",
+    "agent-transfer",
+    "context",
+    "herdr",
+    "cursor",
+    "claude",
+    "codex",
+    "agy"
+  ]
+}

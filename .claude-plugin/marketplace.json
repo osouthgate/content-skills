@@ -5,8 +5,8 @@
     "url": "https://github.com/osouthgate"
   },
   "metadata": {
-    "description": "Content and workflow plugins for Claude Code: YouTube and podcast transcript extraction and summarization (youtube-transcript, podcast-transcript), autonomous planning and unattended execution (supergoal, autonomous-run), and outcome docs carried from intent to proof (promise).",
-    "version": "0.4.0"
+    "description": "Content and workflow plugins for Claude Code: YouTube and podcast transcript extraction and summarization (youtube-transcript, podcast-transcript), autonomous planning and unattended execution (supergoal, autonomous-run), outcome docs via the promise plugin, and cross-harness session handoff (handoff-to-agent).",
+    "version": "0.4.1"
   },
   "plugins": [
     {
@@ -36,6 +36,11 @@
         "repo": "osouthgate/promise"
       },
       "description": "Write the promise before the build, then prove it kept. You write the outcome and rules in your own words, the model may argue in notes but never rewrite them, a linter checks the doc, and your acceptance rows are committed as failing tests before any code is written."
+    },
+    {
+      "name": "handoff-to-agent",
+      "source": "./handoff-to-agent",
+      "description": "Cross-harness session handoff: summarize this session into a handoff document, print a paste-ready first-move prompt, then ask before spawning cursor/agent, claude, codex, or agy in Herdr."
     }
   ]
 }
