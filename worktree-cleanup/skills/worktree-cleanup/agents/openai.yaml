@@ -1,0 +1,4 @@
+interface:
+  display_name: "Worktree Clean-up"
+  short_description: "Review worktrees and remove approved finished checkouts"
+  default_prompt: "Use $worktree-cleanup to review worktree space and prepare a clean-up plan."

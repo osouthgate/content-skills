@@ -1,0 +1,4 @@
+interface:
+  display_name: "Disk and Docker Clean-up"
+  short_description: "Review disk usage and prepare selected Docker/cache clean-up"
+  default_prompt: "Use $disk-cleanup to review disk, Docker and cache space and prepare a clean-up plan."

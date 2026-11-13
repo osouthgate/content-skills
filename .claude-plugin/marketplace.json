@@ -5,10 +5,20 @@
     "url": "https://github.com/osouthgate"
   },
   "metadata": {
-    "description": "Content and workflow plugins for Claude Code: YouTube and podcast transcript extraction and summarization (youtube-transcript, podcast-transcript), autonomous planning and unattended execution (supergoal, autonomous-run), outcome docs via the promise plugin, and cross-harness session handoff (handoff-to-agent).",
-    "version": "0.4.1"
+    "description": "Content and workflow plugins for Claude Code: transcripts, autonomous planning, outcome docs, session handoff, worktree clean-up and disk/Docker clean-up.",
+    "version": "0.5.0"
   },
   "plugins": [
+    {
+      "name": "worktree-cleanup",
+      "source": "./worktree-cleanup",
+      "description": "Review worktree sizes and integration evidence, then remove only explicitly approved finished checkouts while preserving branches and unfinished work."
+    },
+    {
+      "name": "disk-cleanup",
+      "source": "./disk-cleanup",
+      "description": "Review disk and Docker usage; apply approved build-cache, selected container/image and download-cache clean-up while preserving volumes and saved data."
+    },
     {
       "name": "youtube-transcript",
       "source": "./youtube-transcript",
