@@ -23,6 +23,32 @@ class MonitorTests(unittest.TestCase):
     def event(self, kind, **fields):
         return {"type": "response_item", "payload": {"type": kind, **fields}}
 
+    def test_recent_discovery_includes_old_creation_folder_active_today(self):
+        sessions = self.root / "sessions"
+        old = sessions / "2026/11/17"; old.mkdir(parents=True)
+        today = sessions / "2026/11/18"; today.mkdir(parents=True)
+        active = old / "ongoing.jsonl"; active.write_text("{}\n")
+        stale = old / "stale.jsonl"; stale.write_text("{}\n")
+        current = today / "new.jsonl"; current.write_text("{}\n")
+        now = 1805605200
+        os.utime(active, (now, now)); os.utime(current, (now, now))
+        os.utime(stale, (now - 3 * 86400, now - 3 * 86400))
+        paths, coverage = m.discover_codex(sessions, 1, now=now)
+        self.assertEqual(set(paths), {active, current})
+        self.assertFalse(coverage["capped"])
+        self.assertEqual(coverage["matching_files"], 2)
+
+    def test_discovery_budget_is_explicit_and_does_not_follow_symlinks(self):
+        sessions = self.root / "sessions"; sessions.mkdir()
+        (sessions / "2026").symlink_to(self.root, target_is_directory=True)
+        for n in range(10):
+            (sessions / ("noise%d" % n)).touch()
+        with patch.object(m, "MAX_DISCOVERY_ENTRIES", 4):
+            paths, coverage = m.discover_codex(sessions, 1)
+        self.assertEqual(paths, [])
+        self.assertTrue(coverage["capped"])
+        self.assertEqual(coverage["entries_examined"], 4)
+
     def file(self, events):
         path = self.root / "session.jsonl"
         path.write_text("".join(json.dumps(v) + "\n" for v in events))

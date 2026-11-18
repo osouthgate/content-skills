@@ -19,6 +19,7 @@ MAX_RECORD = 256 * 1024
 MAX_FILE = 8 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
 MAX_FILES = 64
+MAX_DISCOVERY_ENTRIES = 4096
 MARKER = "session-monitor-v1\n"
 DEFAULT_STATE = Path.home() / ".local/state/session-monitor"
 EXPLANATIONS = {
@@ -36,6 +37,46 @@ EXPLANATIONS = {
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()[:24]
+
+
+def discover_codex(root, days, now=None):
+    """Bounded date-tree discovery by activity time, including older still-active sessions."""
+    cutoff = (now if now is not None else dt.datetime.now().timestamp()) - days * 86400
+    stats = {"entries_examined": 0, "entry_cap": MAX_DISCOVERY_ENTRIES, "capped": False, "unavailable_directories": 0}
+    found = []
+    def visit(folder, depth):
+        entries = []
+        try:
+            with os.scandir(folder) as source:
+                for entry in source:
+                    if stats["entries_examined"] >= MAX_DISCOVERY_ENTRIES:
+                        stats["capped"] = True
+                        break
+                    stats["entries_examined"] += 1
+                    if depth < 3:
+                        pattern = r"[0-9]{4}" if depth == 0 else r"[0-9]{2}"
+                        if re.fullmatch(pattern, entry.name) and entry.is_dir(follow_symlinks=False):
+                            entries.append(entry)
+                    elif entry.name.endswith(".jsonl") and entry.is_file(follow_symlinks=False):
+                        info = entry.stat(follow_symlinks=False)
+                        if info.st_mtime >= cutoff:
+                            found.append((info.st_mtime, Path(entry.path)))
+        except OSError:
+            stats["unavailable_directories"] += 1
+            return
+        # Recent date folders first, but never assume their date equals last activity.
+        for entry in sorted(entries, key=lambda item: item.name, reverse=True):
+            if stats["entries_examined"] >= MAX_DISCOVERY_ENTRIES:
+                stats["capped"] = True
+                break
+            visit(Path(entry.path), depth + 1)
+    if root.is_symlink():
+        stats["unavailable_directories"] += 1
+    else:
+        visit(root, 0)
+    found.sort(key=lambda item: (-item[0], str(item[1])))
+    stats["matching_files"] = len(found)
+    return [path for _, path in found], stats
 
 
 def checked(path, directory=False):
@@ -343,26 +384,19 @@ def main(argv=None):
             print(json.dumps(repair(args.state_dir, args.action, args.apply, args.expect), indent=2))
             return 0
         paths = [Path(p).expanduser().absolute() for p in args.input]
-        discovery_capped = False
+        discovery = None
         if args.codex_days:
-            for day in range(args.codex_days):
-                date = dt.date.today() - dt.timedelta(days=day)
-                folder = Path.home() / ".codex/sessions" / date.strftime("%Y/%m/%d")
-                if folder.is_dir() and not folder.is_symlink():
-                    with os.scandir(folder) as entries:
-                        for index, entry in enumerate(entries):
-                            if index >= MAX_FILES:
-                                discovery_capped = True
-                                break
-                            if entry.name.endswith(".jsonl") and entry.is_file(follow_symlinks=False):
-                                paths.append(Path(entry.path))
+            recent, discovery = discover_codex(Path.home() / ".codex/sessions", args.codex_days)
+            paths.extend(recent)
         if not paths and not args.sqlite:
             raise ValueError("choose input files, recent Codex days or a log database")
         paths = list(dict.fromkeys(paths))
         def run(state):
             worker = Scan(state)
-            if len(paths) > MAX_FILES or discovery_capped:
+            if len(paths) > MAX_FILES or (discovery and discovery["capped"]):
                 worker.warnings["file_discovery_capped"] += 1
+            if discovery and discovery["unavailable_directories"]:
+                worker.warnings["discovery_directory_unavailable"] += discovery["unavailable_directories"]
             for path in paths[:MAX_FILES]:
                 try:
                     worker.jsonl(path)
@@ -373,7 +407,10 @@ def main(argv=None):
                     worker.database(args.sqlite, args.thread)
                 except (OSError, ValueError, sqlite3.Error):
                     worker.warnings["database_unavailable_or_budget_reached"] += 1
-            return worker.report()
+            report = worker.report()
+            if discovery is not None:
+                report["discovery"] = discovery
+            return report
         if args.daily:
             private_root(args.state_dir, create=True)
             with lock(args.state_dir):
