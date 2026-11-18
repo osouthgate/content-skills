@@ -1,0 +1,10 @@
+{
+  "name": "ci-optimiser",
+  "description": "Measure GitHub Actions time with a run ledger, find the biggest cost, and make CI faster one measured change at a time, without dropping required checks, tests or security scans.",
+  "version": "0.1.0",
+  "author": {"name": "Oliver Southgate", "url": "https://github.com/osouthgate"},
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": ["ci", "github-actions", "performance", "tests", "claude", "codex", "cursor"]
+}
