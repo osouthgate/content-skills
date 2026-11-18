@@ -1,0 +1,10 @@
+{
+  "name": "worktree-cleanup",
+  "description": "Review worktree disk usage, preserve unfinished work, and remove only explicitly approved integrated checkouts with immediate rechecks.",
+  "version": "0.1.0",
+  "author": {"name": "Oliver Southgate", "url": "https://github.com/osouthgate"},
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": ["git", "worktree", "cleanup", "disk", "claude", "codex", "cursor"]
+}
