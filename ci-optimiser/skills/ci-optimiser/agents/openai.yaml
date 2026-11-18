@@ -1,0 +1,4 @@
+interface:
+  display_name: "CI Optimiser"
+  short_description: "Measure GitHub Actions time and make CI faster safely"
+  default_prompt: "Use $ci-optimiser to measure this repository's CI and propose the safest change with the biggest saving."

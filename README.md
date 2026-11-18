@@ -22,6 +22,7 @@ claude plugin install promise@content-skills
 claude plugin install handoff-to-agent@content-skills
 claude plugin install worktree-cleanup@content-skills
 claude plugin install disk-cleanup@content-skills
+claude plugin install ci-optimiser@content-skills
 # then, inside a project:  /promise adopt
 ```
 
@@ -39,6 +40,7 @@ claude plugin install disk-cleanup@content-skills
 - `handoff-to-agent` - Hand a session to another agent harness (`cursor`/`agent`, `claude`, `codex`, `agy`). Writes a self-contained handoff doc, prints a paste-ready first-move prompt, then asks before spawning the target in Herdr. See [`handoff-to-agent/README.md`](handoff-to-agent/README.md).
 - `worktree-cleanup` - Review Git worktree sizes and integration evidence, then remove a reviewed selection. Keeps branches, unfinished work, protected ignored files and locked checkouts. Script and skill work on Claude, Codex and Cursor. See [`worktree-cleanup/README.md`](worktree-cleanup/README.md).
 - `disk-cleanup` - Review disk and Docker usage; prepare approved clean-up plans for build cache, individual stopped containers/unused images and download caches. Docker volumes and saved application data remain protected. Script and skill work on Claude, Codex and Cursor. See [`disk-cleanup/README.md`](disk-cleanup/README.md).
+- `ci-optimiser` - Measure GitHub Actions time with a run ledger (commit, PR, wall, queue, job and step times), find the biggest cost and the commit where a job changed speed, scan workflows for slow patterns, and make CI faster one measured change at a time. Never drops required checks, tests or security scans. Node 22.18+, no packages. See [`ci-optimiser/README.md`](ci-optimiser/README.md).
 
 The `outcome` plugin was removed in promise 1.2.0; its framework lives on in `promise`. Everything `/outcome` did, `/promise` does, and `/promise adopt` sets a project up.
 
