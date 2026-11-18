@@ -77,9 +77,10 @@ export function scanWorkflow(file: string, text: string): Hint[] {
       add(job.name, "full-history", "`fetch-depth: 0` clones all history. Check whether a step reads history (git log, describe, diff against a base); if not, the default shallow clone is faster. If it does, consider `filter: blob:none`.");
     }
     const setups = [...body.matchAll(/uses\s*:\s*actions\/setup-(node|python|go|java)@/g)].map((m) => m[1]!);
-    if (setups.length && !/^\s*cache\s*:/m.test(body) && !/actions\/cache@/.test(body)) {
+    const installs = /\b(npm (ci|install)|yarn( install)?\b|pnpm install|pip install|poetry install|uv sync|go mod download|bundle install|mvn |gradle)/.test(body);
+    if (setups.length && installs && !/^\s*cache\s*:/m.test(body) && !/actions\/cache@/.test(body)) {
       for (const lang of setups) {
-        add(job.name, "no-dependency-cache", `actions/setup-${lang} with no \`cache:\` and no actions/cache. Check whether the job installs packages (npm ci, pip install, go mod download); if it does and the install step is slow in the ledger, a cache keyed on the lock file may help.`);
+        add(job.name, "no-dependency-cache", `actions/setup-${lang} with no \`cache:\` and no actions/cache. The job installs packages. If the install step is slow in the ledger, a cache keyed on the lock file may help; if it takes a few seconds, leave it.`);
       }
     }
     if (/playwright install/.test(body) && !/ms-playwright/.test(body)) {

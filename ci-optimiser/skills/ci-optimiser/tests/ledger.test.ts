@@ -126,6 +126,8 @@ jobs:
       - run: npm ci
 `;
   assert.deepEqual(scanWorkflow("ci.yml", tidy), []);
+  const noInstall = "on: push\njobs:\n  py:\n    timeout-minutes: 5\n    steps:\n      - uses: actions/setup-python@v5\n      - run: python3 -m unittest\n";
+  assert.deepEqual(scanWorkflow("py.yml", noInstall), [], "no cache hint when nothing is installed");
   assert.equal(scanWorkflow("t.yml", "on:\n  pull_request_target:\njobs:\n  a:\n    timeout-minutes: 1\n    steps:\n      - run: x\n").length, 0);
 });
 
