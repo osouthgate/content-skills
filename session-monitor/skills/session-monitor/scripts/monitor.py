@@ -27,7 +27,7 @@ EXPLANATIONS = {
     "tool_failure": "Tool returned an explicit error or non-zero exit.",
     "tool_failure_reported": "Tool output mentions a non-zero exit; inspect locally before treating as a new failure.",
     "hook_error": "Structured hook or hook-targeted runtime error; inspect locally.",
-    "hook_error_reported": "Tool output reports a hook-style error; root cause unverified.",
+    "hook_error_reported": "Tool output or a typed Claude hook summary reports an error; root cause unverified.",
     "policy_refusal": "A claim, permission or merge gate refused an action.",
     "review_limit": "Review-round limit stopped further review.",
     "billing_block": "Account billing or spending prevented CI from starting.",
@@ -177,6 +177,11 @@ def categories(text, error=False, hook=False):
 
 def classify(value):
     if not isinstance(value, dict):
+        return set()
+    if value.get("type") == "system" and value.get("subtype") == "stop_hook_summary":
+        errors = value.get("hookErrors")
+        if isinstance(errors, list) and errors and all(isinstance(e, str) and e.strip() for e in errors):
+            return {"hook_error_reported"}
         return set()
     payload = value.get("payload", value)
     if not isinstance(payload, dict):
