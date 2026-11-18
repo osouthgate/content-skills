@@ -1,6 +1,6 @@
 /**
  * Static hints from GitHub Actions workflow files: the ci-optimiser skill's
- * hygiene checklist (references/techniques.md, section 12) as code.
+ * hygiene checklist (references/techniques.md, section 14) as code.
  *
  * It reads YAML as text, line by line, with no YAML library, so the skill stays
  * free of installs. It is a list of places to look, not a verdict: every hint

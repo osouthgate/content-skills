@@ -137,7 +137,39 @@ Rank files by time (section 0), then look in the top ten for:
 - **A workflow that is always red alarms nobody.** Count failures per job over
   two weeks before tuning speed; fix the always-failing jobs first.
 
-## 11. Bigger levers (owner decisions)
+## 11. A default branch that keeps moving
+
+Fast checks do not help when every merge makes the other open PRs stale and
+their checks run again.
+
+- **Find:** the catch-up rate. Over the last 40 merged PRs, count the ones
+  whose commits include a merge of the default branch into the PR ("Merge
+  branch 'main'", "Merge remote-tracking branch 'origin/main'"), and the
+  number of such commits per PR. `gh pr list --state merged --json
+  number,createdAt,mergedAt,commits` has everything needed. Also count check
+  runs per merged PR. One repo with several agents merging about 50 PRs a day
+  had 19 of 40 PRs catch up at least once, and one PR six times.
+- **Why:** a rule of "the PR head must contain the default branch tip" turns
+  every merge into a rerun for every other PR. The cost grows with the number
+  of authors, not with the size of the suite.
+- **Fix:** a merge queue. Reviewed changes wait in a line; the queue runs the
+  checks on a temporary merge of the change with the current default branch,
+  and lands it when they pass. Nobody updates a branch by hand. Hosted queues
+  exist (GitHub merge queue, Mergify); when hosted CI is not available, one
+  local lane that takes one change at a time does the same job.
+- **Make it safe:** the rule to keep is that what lands has passed the checks
+  as merged with the branch it lands on. A clean merge with the default branch
+  is not a new review. A conflict or a failed check sends the change back with
+  the reason. Keep the owner's approval on gate files and risky changes.
+- **Also reduce collisions:** a file that most PRs touch (one very large
+  module, a shared changelog) causes most of the catch-ups. Split it, or use
+  one changelog fragment file per change.
+- **Measure before and after:** catch-up rate (target near zero), time from
+  ready to landed (median and p90), check runs per landed change (target one),
+  and reverts per 100 landed changes. If reverts rise, tighten the checks
+  before making the queue faster.
+
+## 12. Bigger levers (owner decisions)
 
 - **More shards or bigger runners:** shorter wall time, more cost. Check queue
   time first.
@@ -150,14 +182,14 @@ Rank files by time (section 0), then look in the top ten for:
   shadow the selection for weeks and switch only when it would have missed
   nothing.
 
-## 12. Faster drop-in tools
+## 13. Faster drop-in tools
 
 - **Find:** lint and type-check steps by total runner time.
 - **Make it safe:** compare rule coverage first (above all type-aware rules),
   run both side by side, switch only when the new one reports the same errors,
   and keep every ratchet that counts suppressions working.
 
-## 13. Hygiene checklist
+## 14. Hygiene checklist
 
 `scripts/workflow-scan.ts` checks the first five automatically.
 
