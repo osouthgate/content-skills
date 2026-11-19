@@ -25,6 +25,7 @@ def load(name, plugin, filename):
 
 
 wt = load("wt_cleanup", "worktree-cleanup", "worktree_cleanup.py")
+hunt = load("wt_hunt", "worktree-cleanup", "worktree_hunt.py")
 disk = load("disk_cleanup", "disk-cleanup", "disk_cleanup.py")
 
 
@@ -99,7 +100,20 @@ class Worktrees(unittest.TestCase):
     def test_ignored_saved_data_kept(self):
         (self.path / "scratch").mkdir()
         (self.path / "scratch/results").write_text("saved result")
-        self.assertEqual(self.result()["status"], "KEEP")
+        result = self.result()
+        self.assertEqual(result["status"], "KEEP")
+        self.assertIn("scratch/", result["blocked_by"])
+
+    def test_summary_groups_reasons_and_largest_examples(self):
+        summary = wt.summarize({"items": [
+            {"status": "KEEP", "reason": "recent checkout or Git activity", "path": "/small", "bytes": 10, "activity_age_days": 0.5},
+            {"status": "KEEP", "reason": "recent checkout or Git activity", "path": "/large", "bytes": 30, "activity_age_days": 1},
+            {"status": "REMOVE", "reason": "ancestor of current origin default branch", "path": "/done", "bytes": 5},
+        ], "errors": [{"repo": "/a", "error": "origin tracking branch is stale"}, {"repo": "/b", "error": "origin tracking branch is stale"}]})
+        self.assertEqual(summary["keep"], 2)
+        self.assertEqual(summary["remove"], 1)
+        self.assertEqual(summary["by_reason"][0]["examples"][0]["path"], "/large")
+        self.assertEqual(summary["errors"], [{"error": "origin tracking branch is stale", "count": 2}])
 
     def test_build_artifacts_removed_with_checkout(self):
         (self.path / "node_modules").mkdir()
@@ -108,8 +122,12 @@ class Worktrees(unittest.TestCase):
         self.assertFalse(self.path.exists())
 
     def test_locked_checkout_kept(self):
-        self.g(self.repo, "worktree", "lock", str(self.path))
-        self.assertEqual(self.result()["status"], "KEEP")
+        self.g(self.repo, "worktree", "lock", "--reason", "Reserved for review", str(self.path))
+        result = self.result()
+        self.assertEqual(result["status"], "KEEP")
+        summary = wt.summarize({"items": [result]})
+        self.assertEqual(summary["by_reason"][0]["examples"][0]["lock_reason"],
+                         "Reserved for review")
 
     def test_in_progress_git_operation_kept(self):
         gd = Path(self.g(self.path, "rev-parse", "--absolute-git-dir"))
@@ -227,6 +245,55 @@ class Worktrees(unittest.TestCase):
             self.assertEqual(wt.main(), 0)
         self.assertFalse(self.path.exists())
         self.g(self.repo, "show-ref", "--verify", "refs/heads/finished")
+
+    def test_hunt_finds_registered_worktrees_and_skips_traps(self):
+        trap = self.repo / "node_modules" / "hidden"
+        trap.mkdir(parents=True)
+        self.g(trap, "init", "--initial-branch=main")
+        submodule = self.repo / "vendor"
+        submodule.mkdir()
+        (submodule / ".git").write_text("gitdir: /tmp/not-a-real-repo/.git/modules/vendor\n")
+        outside = self.root / "elsewhere"
+        self.g(self.root, "init", "--initial-branch=main", str(outside))
+        scan = self.root / "scan"
+        scan.mkdir()
+        (scan / "jump").symlink_to(outside, target_is_directory=True)
+        found = hunt.hunt([str(self.root)])
+        commons = {os.path.normpath(item["common"]) for item in found["repos"]}
+        self.assertIn(os.path.normpath(self.repo / ".git"), commons)
+        self.assertNotIn(os.path.normpath(trap / ".git"), commons)
+        self.assertTrue(all(item["path"] != str(submodule) for item in found["unregistered"]))
+        linked = hunt.hunt([str(scan)])
+        self.assertEqual(linked["repos"], [])
+        self.assertEqual(linked["unregistered"], [])
+        with self.assertRaises(hunt.Refused):
+            hunt.hunt(["relative/path"])
+
+    def test_discover_reports_linked_checkout_and_keeps_unregistered(self):
+        trap = self.repo / "node_modules" / "hidden"
+        trap.mkdir(parents=True)
+        self.g(trap, "init", "--initial-branch=main")
+        placed = self.root / "placed"
+        self.g(self.repo, "worktree", "add", "-b", "moved", str(placed))
+        moved = self.root / "moved-aside"
+        placed.rename(moved)
+        output = io.StringIO()
+        argv = ["cleanup", "report", "--discover", str(self.root), "--min-age-days", "0"]
+        with mock.patch.object(os.sys, "argv", argv), contextlib.redirect_stdout(output):
+            code = wt.main()
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        paths = {item["path"] for item in result["items"]}
+        self.assertIn(str(self.path), paths)
+        self.assertIn(str(moved), paths)
+        moved_row = next(item for item in result["items"] if item["path"] == str(moved))
+        self.assertEqual(moved_row["status"], "KEEP")
+        self.assertNotIn(str(trap), paths)
+        self.assertEqual(result["discovery"]["roots"], [str(self.root)])
+
+    def test_report_without_a_repo_or_discover_root_is_refused(self):
+        with mock.patch.object(os.sys, "argv", ["cleanup", "report"]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(wt.main(), 2)
 
 
 class Caches(unittest.TestCase):
@@ -517,9 +584,17 @@ class Packaging(unittest.TestCase):
             meta = json.loads((directory / ".claude-plugin/plugin.json").read_text())
             self.assertEqual(meta["name"], name)
             canonical = directory / "skills" / name
-            self.assertIn("name: " + name, (canonical / "SKILL.md").read_text())
+            skill = (canonical / "SKILL.md").read_text()
+            self.assertIn("name: " + name, skill)
+            self.assertIn("prevention.md", skill)
+            self.assertTrue((canonical / "prevention.md").is_file())
+            self.assertNotIn("/home/osouthgate", (canonical / "prevention.md").read_text())
             self.assertTrue((canonical / "agents/openai.yaml").is_file())
             self.assertTrue((directory / "README.md").is_file())
+        index = (ROOT / "STORAGE_OPTIMIZATION.md").read_text()
+        self.assertIn("disk-cleanup/skills/disk-cleanup/prevention.md", index)
+        self.assertIn("worktree-cleanup/skills/worktree-cleanup/prevention.md", index)
+        self.assertNotIn("/home/osouthgate", index)
 
     def test_cli_help_and_missing_approval_never_remove(self):
         for module in (wt, disk):

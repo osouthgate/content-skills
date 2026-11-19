@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Content and workflow plugins for Claude Code: transcripts, autonomous planning, outcome docs, session handoff, worktree clean-up, disk/Docker clean-up and CI optimisation.",
-    "version": "0.6.0"
+    "version": "0.6.1"
   },
   "plugins": [
     {
       "name": "worktree-cleanup",
       "source": "./worktree-cleanup",
-      "description": "Review worktree sizes and integration evidence, then remove only explicitly approved finished checkouts while preserving branches and unfinished work."
+      "description": "Review worktree sizes and integration evidence, then remove only explicitly approved finished checkouts while preserving branches and unfinished work. Includes lifecycle prevention notes."
     },
     {
       "name": "disk-cleanup",

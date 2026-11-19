@@ -122,8 +122,11 @@ def inspect(ctx, row, cutoff, active, measure=False):
         out["reason"] = why
         return out
 
-    if row.get("bare") or "locked" in row:
-        return keep("bare repository or locked worktree")
+    if row.get("bare"):
+        return keep("bare repository")
+    if "locked" in row:
+        out["lock_reason"] = row["locked"] if isinstance(row["locked"], str) else ""
+        return keep("locked worktree")
     p = Path(path)
     if not p.is_dir() or p.is_symlink() or str(p.resolve()) != path:
         return keep("missing, symlinked or non-canonical path")
@@ -142,6 +145,7 @@ def inspect(ctx, row, cutoff, active, measure=False):
             return keep("Git operation in progress")
     latest = max(q.stat().st_mtime for q in (p, gd, gd / "HEAD", gd / "index", gd / "logs/HEAD") if q.exists())
     if latest > cutoff:
+        out["activity_age_days"] = round(max(0, time.time() - latest) / 86400, 2)
         return keep("recent checkout or Git activity")
     if git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"):
         return keep("tracked changes or untracked files")
@@ -149,6 +153,7 @@ def inspect(ctx, row, cutoff, active, measure=False):
     # Only explicitly recognisable build/cache trees may be discarded with the checkout.
     protected = [x for x in ignored if not any(part in ARTIFACTS for part in Path(x.rstrip("/")).parts)]
     if protected:
+        out["blocked_by"] = protected[:8]
         return keep("protected ignored files/directories (including possible secrets or saved data)")
     if git(path, "ls-files", "--stage").find("160000 ") >= 0:
         return keep("submodules require manual review")
@@ -213,6 +218,67 @@ def scan(repos, github, age, measure=True):
     return result
 
 
+def summarize(result, limit=3):
+    groups = {}
+    for item in result["items"]:
+        key = (item.get("status", "KEEP"), item.get("reason") or "(no reason)")
+        group = groups.setdefault(key, {"status": key[0], "reason": key[1], "count": 0,
+                                        "bytes": 0, "unmeasured": 0, "examples": []})
+        group["count"] += 1
+        group["bytes"] += item.get("bytes") or 0
+        if item.get("bytes") is None:
+            group["unmeasured"] += 1
+        group["examples"].append({key: item[key] for key in
+                                  ("path", "activity_age_days", "blocked_by", "lock_reason")
+                                  if key in item} | {"bytes": item.get("bytes")})
+    rows = []
+    for group in groups.values():
+        examples = sorted(group["examples"], key=lambda row: row["bytes"] or 0, reverse=True)[:limit]
+        rows.append({
+            "status": group["status"], "reason": group["reason"], "count": group["count"], "bytes": group["bytes"],
+            "unmeasured": group["unmeasured"], "examples": examples,
+        })
+    rows.sort(key=lambda row: (-row["bytes"], -row["count"], row["reason"]))
+    errors = {}
+    for err in result.get("errors", []):
+        errors[err.get("error") or "(no error)"] = errors.get(err.get("error") or "(no error)", 0) + 1
+    return {
+        "keep": sum(row["count"] for row in rows if row["status"] == "KEEP"),
+        "remove": sum(row["count"] for row in rows if row["status"] == "REMOVE"),
+        "keep_bytes": sum(row["bytes"] for row in rows if row["status"] == "KEEP"),
+        "remove_bytes": sum(row["bytes"] for row in rows if row["status"] == "REMOVE"),
+        "by_reason": rows,
+        "errors": [{"error": message, "count": count} for message, count in sorted(errors.items(), key=lambda item: (-item[1], item[0]))],
+        "note": "Bytes are approximate. A main checkout can include nested worktrees, so totals are not recoverable space.",
+    }
+
+
+def write_summary(summary):
+    def amount(n):
+        if n is None:
+            return "size unmeasured"
+        return f"{n / 1_000_000_000:.2f} GB"
+    print(f"KEEP {summary['keep']}  {amount(summary['keep_bytes'])}", file=sys.stderr)
+    print(f"REMOVE {summary['remove']}  {amount(summary['remove_bytes'])}", file=sys.stderr)
+    for row in summary["by_reason"]:
+        measured = amount(row["bytes"]) if row["unmeasured"] < row["count"] else "size unmeasured"
+        if 0 < row["unmeasured"] < row["count"]:
+            measured += f" measured, {row['unmeasured']} unmeasured"
+        print(f"{row['status']} {row['count']}  {measured}  {row['reason']}", file=sys.stderr)
+        for example in row["examples"]:
+            extra = ""
+            if "activity_age_days" in example:
+                extra = f"  activity {example['activity_age_days']} days"
+            elif example.get("blocked_by"):
+                extra = "  blocked by " + ", ".join(example["blocked_by"][:4])
+            elif "lock_reason" in example:
+                reason = example["lock_reason"]
+                extra = "  Git lock note: " + (json.dumps(reason) if reason else "none recorded")
+            print(f"  {amount(example['bytes'])}  {example['path']}{extra}", file=sys.stderr)
+    for err in summary["errors"]:
+        print(f"ERROR {err['count']}  {err['error']}", file=sys.stderr)
+
+
 def save_plan(plan, output):
     data = (json.dumps(plan, indent=2, sort_keys=True) + "\n").encode()
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -267,12 +333,32 @@ def apply(plan):
         print(json.dumps({"removed": item["path"], "branch_preserved": item["branch"]}), flush=True)
 
 
+def discover(roots):
+    script = Path(__file__).resolve().with_name("worktree_hunt.py")
+    try:
+        proc = subprocess.run([sys.executable, str(script), *roots], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Refused("Worktree hunt failed to run") from exc
+    if proc.returncode != 0:
+        raise Refused((proc.stderr.strip() or "worktree hunt failed").removeprefix("REFUSED: "))
+    try:
+        found = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise Refused("Worktree hunt returned invalid JSON") from exc
+    if found.get("kind") != "worktree-hunt" or not isinstance(found.get("repos"), list):
+        raise Refused("Worktree hunt returned an unexpected result")
+    return found
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
     for name in ("report", "plan"):
         s = sub.add_parser(name)
-        s.add_argument("repos", nargs="+")
+        s.add_argument("repos", nargs="*")
+        s.add_argument("--discover", action="append", default=[], metavar="ROOT",
+                       help="Absolute directory to search with worktree_hunt.py; repeatable; read-only")
         s.add_argument("--github", action="store_true", help="Check open PRs and exact merged PR heads (requires gh)")
         s.add_argument("--min-age-days", type=float, default=2)
         if name == "plan":
@@ -288,7 +374,21 @@ def main():
             return 0
         if not math.isfinite(args.min_age_days) or args.min_age_days < 0:
             raise Refused("Minimum age must be finite and non-negative")
-        result = scan(args.repos, args.github, args.min_age_days)
+        repos = list(args.repos)
+        found = discover(args.discover) if args.discover else None
+        if found:
+            repos.extend(item["path"] for item in found["repos"])
+        if not repos:
+            raise Refused("Name at least one repository or pass --discover ROOT")
+        result = scan(repos, args.github, args.min_age_days)
+        if found:
+            result["discovery"] = {key: found[key] for key in ("roots", "unregistered", "skipped", "errors")}
+            for item in found["unregistered"]:
+                result["items"].append({"path": item["path"], "status": "KEEP",
+                                        "reason": item["reason"], "repo": item.get("common")})
+        if args.command == "report":
+            result["summary"] = summarize(result)
+            write_summary(result["summary"])
         if args.command == "plan":
             if result["errors"]:
                 raise Refused(json.dumps(result["errors"]))
