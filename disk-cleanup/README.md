@@ -60,6 +60,7 @@ python3 -m unittest discover -s tests -v
 Tests use disposable cache files and a fake Docker command layer. They do not
 delete real Docker objects. Live validation uses reports and command help only.
 
+- [Prevention notes](skills/disk-cleanup/prevention.md) (installed with the skill; the repo index is [STORAGE_OPTIMIZATION.md](../STORAGE_OPTIMIZATION.md))
 - [Docker Buildx prune](https://docs.docker.com/reference/cli/docker/buildx/prune/)
 - [Docker Buildx builder inspection](https://docs.docker.com/reference/cli/docker/buildx/inspect/)
 - [Docker container removal](https://docs.docker.com/reference/cli/docker/container/rm/)

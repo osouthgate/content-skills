@@ -89,6 +89,19 @@ Report only confirmed actions. On failure, report partial completion and the
 refusal; do not retry a broader command. Recheck `df -h` and the relevant Docker
 usage. Empty cache directories are intentionally left in place.
 
+## When the same growth will return
+
+After verify, name what will refill the disk. Read [prevention.md](prevention.md)
+only in that case, or when the user asks why usage returns. On a normal cleanup,
+do not open it and do not apply it.
+
+- Git worktrees dominate: stop and use `worktree-cleanup`.
+- Docker build cache will refill: tell the user about `docker run --rm`,
+  BuildKit cache mounts, and a builder GC cap above this script's 10 GB reserve.
+  Do not edit `daemon.json`, restart Docker, or delete volumes.
+- Pacman, journal, yay, npm, or other system caches dominate: report the size
+  and the usual human command from prevention.md, then stop. Do not run them.
+
 ## Always preserve
 
 - Docker volumes (named or anonymous), even when Docker calls them unused or

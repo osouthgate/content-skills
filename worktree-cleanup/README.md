@@ -2,7 +2,10 @@
 
 A small skill around a Python script. Reports first; removes an explicitly
 selected, reviewed plan. Keeps branches, local changes, protected ignored files,
-locked worktrees and checkouts without current integration evidence.
+locked worktrees and checkouts without current integration evidence. The
+installed [prevention.md](skills/worktree-cleanup/prevention.md) covers
+lifecycle prevention: one parent directory for new checkouts, end-of-task
+teardown, no secret copies into disposable trees, and a weekly report cadence.
 
 ## Install
 
@@ -24,9 +27,16 @@ Run from any directory:
 
 ```bash
 python3 /path/to/worktree-cleanup/skills/worktree-cleanup/scripts/worktree_cleanup.py report /path/to/repo --github
+python3 /path/to/worktree-cleanup/skills/worktree-cleanup/scripts/worktree_hunt.py /absolute/root
+python3 /path/to/worktree-cleanup/skills/worktree-cleanup/scripts/worktree_cleanup.py report --discover /absolute/root --github
 python3 /path/to/worktree-cleanup/skills/worktree-cleanup/scripts/worktree_cleanup.py plan /path/to/repo --github --select /path/to/finished-checkout --output /tmp/reviewed-worktrees.json
 python3 /path/to/worktree-cleanup/skills/worktree-cleanup/scripts/worktree_cleanup.py apply /tmp/reviewed-worktrees.json --approve PLAN_SHA256
 ```
+
+`worktree_hunt.py` only searches the absolute roots it is given. It does not
+follow symlinks or cross onto another filesystem, and it does not delete
+anything. `--discover` passes those roots to it, then reports the repositories
+it found. Checkouts that are no longer registered stay KEEP.
 
 JSON reports include reasons and approximate directory bytes. Origin's default
 tracking branch must match the remote. Fetch before retrying a stale-ref refusal.
@@ -57,4 +67,4 @@ local worktree reaper. The [reviewed gist](https://gist.github.com/Seklfreak/209
 inspired the workflow, but none of its source is copied. It does not require
 worktrunk, auto-stash dirty files, delete branches or sweep sibling directories.
 
-Reference: [Git worktree documentation](https://git-scm.com/docs/git-worktree).
+Reference: [Git worktree documentation](https://git-scm.com/docs/git-worktree). Prevention notes installed with the skill: [prevention.md](skills/worktree-cleanup/prevention.md). Repo index: [STORAGE_OPTIMIZATION.md](../STORAGE_OPTIMIZATION.md).
