@@ -23,6 +23,7 @@ claude plugin install handoff-to-agent@content-skills
 claude plugin install worktree-cleanup@content-skills
 claude plugin install disk-cleanup@content-skills
 claude plugin install ci-optimiser@content-skills
+claude plugin install 5-whys@content-skills
 # then, inside a project:  /promise adopt
 ```
 
@@ -41,6 +42,7 @@ claude plugin install ci-optimiser@content-skills
 - `worktree-cleanup` - Review Git worktree sizes and integration evidence, then remove a reviewed selection. Also carries lifecycle prevention (one parent for new checkouts, end-of-task teardown, weekly report cadence). Keeps branches, unfinished work, protected ignored files and locked checkouts. Script and skill work on Claude, Codex and Cursor. See [`worktree-cleanup/README.md`](worktree-cleanup/README.md).
 - `disk-cleanup` - Review disk and Docker usage; prepare approved clean-up plans for build cache, individual stopped containers/unused images and download caches. Docker volumes and saved application data remain protected. Script and skill work on Claude, Codex and Cursor. See [`disk-cleanup/README.md`](disk-cleanup/README.md).
 - `ci-optimiser` - Measure GitHub Actions time with a run ledger (commit, PR, wall, queue, job and step times), find the biggest cost and the commit where a job changed speed, scan workflows for slow patterns, and make CI faster one measured change at a time. Never drops required checks, tests or security scans. Node 22.18+, no packages. See [`ci-optimiser/README.md`](ci-optimiser/README.md).
+- `5-whys` - Trace a problem to a root cause with Five Whys: an evidenced cause chain, a removal test that separates a root cause from a contributing factor, and countermeasures aimed at recurrence. English only. A short technique, not a full safety investigation. Adapted from [awesome-skills/5-whys-skill](https://github.com/awesome-skills/5-whys-skill). See [`5-whys/README.md`](5-whys/README.md).
 
 For why the same disk growth returns, start at [`STORAGE_OPTIMIZATION.md`](STORAGE_OPTIMIZATION.md). Each installed skill carries its own prevention note.
 

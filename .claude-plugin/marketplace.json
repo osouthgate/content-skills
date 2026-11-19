@@ -5,8 +5,8 @@
     "url": "https://github.com/osouthgate"
   },
   "metadata": {
-    "description": "Content and workflow plugins for Claude Code: transcripts, autonomous planning, outcome docs, session handoff, worktree clean-up, disk/Docker clean-up and CI optimisation.",
-    "version": "0.6.1"
+    "description": "Content and workflow plugins for Claude Code: transcripts, autonomous planning, outcome docs, session handoff, worktree clean-up, disk/Docker clean-up, CI optimisation and Five Whys.",
+    "version": "0.7.0"
   },
   "plugins": [
     {
@@ -51,6 +51,11 @@
         "repo": "osouthgate/promise"
       },
       "description": "Write the promise before the build, then prove it kept. You write the outcome and rules in your own words, the model may argue in notes but never rewrite them, a linter checks the doc, and your acceptance rows are committed as failing tests before any code is written."
+    },
+    {
+      "name": "5-whys",
+      "source": "./5-whys",
+      "description": "Trace a problem to a root cause with Five Whys: an evidenced cause chain, a removal test, and countermeasures that prevent recurrence."
     },
     {
       "name": "handoff-to-agent",

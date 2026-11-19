@@ -1,0 +1,4 @@
+interface:
+  display_name: "5 Whys"
+  short_description: "Trace a problem to the cause that would stop it recurring"
+  default_prompt: "Use $5-whys to trace this problem to a root cause and say what would stop it coming back."
