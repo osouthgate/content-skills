@@ -1,0 +1,13 @@
+{
+  "name": "5-whys",
+  "description": "Trace a problem to a root cause with Five Whys: an evidenced cause chain, a removal test, and countermeasures that prevent recurrence.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": ["5-whys", "root-cause", "rca", "incident", "debug", "claude", "codex", "cursor"]
+}
