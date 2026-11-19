@@ -79,6 +79,39 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn(str(path), result)
         self.assertEqual(scanner.counts, {"tool_failure": 1, "tool_call": 1})
 
+    def test_claude_stop_summary_reports_only_typed_nonempty_error_lists(self):
+        # The wrapper and empty list were observed locally; nonempty strings are synthetic fixtures,
+        # corroborated by the firsthand upstream report linked in references/evidence.md.
+        summary = {"type": "system", "subtype": "stop_hook_summary", "hookErrors": []}
+        for errors in (["Synthetic hook error"], ["first", "second"]):
+            with self.subTest(errors=errors):
+                self.assertEqual(m.classify({**summary, "hookErrors": errors}), {"hook_error_reported"})
+        for errors in ([], None, "hook failed", {}, [None], [7], [False], [""], [" \t"],
+                       ["hook failed", {}], ["hook failed", ""]):
+            with self.subTest(errors=errors):
+                self.assertEqual(m.classify({**summary, "hookErrors": errors}), set())
+        reported = {**summary, "hookErrors": ["Synthetic hook error"]}
+        for other in ({**reported, "type": "assistant"}, {**reported, "subtype": "other"},
+                      self.event("message", role="user", content=reported),
+                      self.event("function_call_output", output=json.dumps(reported)),
+                      {"message": {"content": [{"type": "text", "text": json.dumps(reported)}]}}):
+            self.assertEqual(m.classify(other), set())
+
+    def test_claude_stop_summary_privacy_and_incremental_deduplication(self):
+        canary = "private-hook-command-and-error-canary-42719"
+        summary = {"type": "system", "subtype": "stop_hook_summary", "hookErrors": [canary, "second error"],
+                   "hookInfos": [{"command": canary}]}
+        path = self.file([summary, {**summary, "hookErrors": []}])
+        state = {"v": m.VERSION, "sources": {}}
+        first = m.Scan(state); first.jsonl(path)
+        self.assertEqual(first.counts, {"hook_error_reported": 1})
+        self.assertNotIn("hook_error", first.counts)
+        report = json.dumps(first.report())
+        self.assertNotIn(canary, report)
+        self.assertNotIn(str(path), report)
+        second = m.Scan(state); second.jsonl(path)
+        self.assertEqual(second.counts, {})
+
     def test_daily_cursor_deduplicates_and_retries_unfinished_record(self):
         path = self.file([self.event("hook_error")])
         state = {"v": 1, "sources": {}}
