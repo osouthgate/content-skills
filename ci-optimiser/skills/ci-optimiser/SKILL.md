@@ -18,7 +18,16 @@ folder. Below, `SKILL` means that folder. Never assume a fixed install path.
 ## The tools
 
 - `scripts/ledger-lib.ts`: the pure logic (parse, normalise, day files, report).
-- `scripts/ledger.ts`: the CLI, with `pull`, `import` and `report`.
+- `scripts/ledger.ts`: the CLI, with `pull`, `import`, `report` and `compare`.
+  `compare` is the before / after verdict: the median shift with an exact 95%
+  interval, from 5 or more passed runs a side, refusing a window that has not
+  settled (`scripts/compare-lib.ts` has the arithmetic).
+- `scripts/diff-guard.ts`: the "never trade proof for speed" rule as a check.
+  `diff` lists what a change adds that hides a failure (retries, skips,
+  `continue-on-error`, `|| true`, wider timeouts, a bypassed hook, wider trust)
+  and any assertion removed. `tests` compares JUnit reports by test name and
+  fails if a test stopped running, was skipped or newly fails
+  (`scripts/guard-lib.ts`).
 - `scripts/workflow-scan.ts`: hints from `.github/workflows` (no cancel of
   superseded runs, no timeout, full-history clones, no dependency cache, browser
   downloads, long serial jobs, a commit that runs on both `push` and
@@ -31,6 +40,14 @@ folder. Below, `SKILL` means that folder. Never assume a fixed install path.
 - `references/target.md`: the target, the rules that outrank speed, the audit,
   budgets per bucket and how to deliver. Read it first when asked to make CI as
   fast as possible.
+- `references/evidence.md`: where each rule comes from (reasoning, GitHub's
+  docs, a choice, or another team's reported result), so a rule can be
+  challenged on its basis.
+- `references/agents-snippet.md`: the rules for any agent that edits CI, short
+  enough to paste into a repository's AGENTS.md or CLAUDE.md.
+- `../../evals/` (in the plugin folder, not the skill folder): three made-up
+  repositories with a planted cause and a scripted check, for testing an agent
+  that uses this skill. See its README.
 
 They need **Node 22.18 or later** (it runs TypeScript itself) and nothing else:
 no installs, no imports outside this folder. Tests: `node --test SKILL/tests/*.test.ts`.
@@ -40,6 +57,15 @@ no installs, no imports outside this folder. Tests: `node --test SKILL/tests/*.t
 node SKILL/scripts/ledger.ts pull --since 14d --repo owner/name   # read-only; one day per API query
 node SKILL/scripts/ledger.ts report --days 7 --branch main        # this week against last week
 node SKILL/scripts/optimise.ts --pull --days 7 --repo owner/name  # the brief: test-results/ci-optimiser/brief.md
+
+# after a change merged: windows chosen BEFORE looking, then pull again once they have settled
+node SKILL/scripts/ledger.ts pull --since 2026-11-01 --repo owner/name
+node SKILL/scripts/ledger.ts compare --job test --label ubuntu-latest \
+  --before 2026-11-01..2026-11-10T14:00:00Z --after 2026-11-10T14:00:00Z..2026-11-14
+
+# a change before it is pushed: nothing that hides a failure, and no test lost
+node SKILL/scripts/diff-guard.ts diff
+node SKILL/scripts/diff-guard.ts tests --before junit-before --after junit-after
 ```
 
 - `pull` reads the GitHub Actions API with `GITHUB_TOKEN`, `GH_TOKEN` or a
@@ -49,6 +75,9 @@ node SKILL/scripts/optimise.ts --pull --days 7 --repo owner/name  # the brief: t
 - `import <dir>` is for a session with no token but GitHub MCP tools: save the
   runs list as `runs.json` (`{ "workflow_runs": [...] }`) and each run's jobs as
   `jobs-<runId>.json` (`{ "jobs": [...] }`), then import the folder.
+- `pull` first checks how many API requests are left and stops, writing
+  nothing, if the new runs would use them all. A complete pull records its time
+  and start day in `test-results/ci-ledger/pull-state.json`; `compare` reads it.
 - The default ledger folder is `docs/ledger/ci/` (`--dir` changes it). The
   default report folder is `test-results/` (keep it out of git).
 
@@ -86,24 +115,63 @@ edit the scripts for them.
    always present but never last. Read required checks from branch protection
    or rulesets (read only); if every required check is external, fall back to
    the PR wall time itself.
+
+   Size each cause in one of two honest ways, and say which:
+   - **Observed:** the difference in median step time between runs of the same
+     job on the same runner, with the cause and without it, in this ledger
+     (cold against warm installs). Show both counts. It is an estimate for
+     ranking, not yet a measured result of the fix.
+   - **Ceiling:** when no run here is without the cause, the most the fix could
+     save, written "up to", with the assumption (with ideal scaling, twice the
+     workers halves the time of tests that run in parallel). A saving never
+     exceeds the time the changed steps take.
+
+   Turn it into minutes of wait a day: per run, the saving on the critical path
+   (never more than that run's own time in the affected steps, zero for runs
+   without the cause), summed over the window and divided by the days it spans.
+   Never add the savings of different causes: they can overlap (less than the
+   sum), combine (more, as with two equally long paths) or move the critical
+   path. Rank observed causes first and list ceilings under their own heading.
+   If every row is a ceiling, say the biggest cause is not known yet and name
+   the measurement that would settle it.
 3. **Find the cause.** Read `references/techniques.md` first.
    - A slow step: read its log (`gh run view --log --job <id>`).
    - A slow test step: time each test file (techniques.md section 0).
    - Install or build steps: check caching and build filters.
-4. **Change one thing**, in its own PR. The PR body names the expected saving,
-   the ledger lines it should move (job, p50 before) and the cost if it goes wrong.
-5. **Measure again** after a few days of runs on the default branch. Compare
-   the job's p50 before and after the merge commit. Keep the change if it saved
-   time; revert it if it did not. Record the result in an improvements log
-   beside the ledger, including changes that saved nothing.
+4. **Change one thing**, in its own PR. The PR body names the expected saving
+   (observed or ceiling), the ledger lines it should move (job, p50 before) and
+   the cost if it goes wrong. Before asking for review, run
+   `diff-guard.ts diff` and, for any change to tests or test setup, `diff-guard.ts
+   tests` on the JUnit reports of the base and the branch: a lost test fails the
+   change now, not after merge. Put the baseline in the PR as **provisional**.
+   For a change to tests, also re-plant a bug the suite once caught on a local
+   throwaway branch (never pushed, so no CI run starts), confirm the tests fail
+   for that reason, and delete the branch.
+5. **Measure again.** Choose both windows before looking: the before window
+   ends at the merge commit's time and the after window starts there, and let
+   the after window run past a day when you can. Wait until every run created
+   in it has finished (fast runs finish first), then `pull` again and run
+   `ledger.ts compare`. It needs 5 passed runs a side, so a quiet repo needs a
+   longer window; never start runs just to fill the count, since runs cost
+   money. Report its verdict as printed, with its run count. Keep the change if
+   it saved time; revert it if it did not. A "no measurable change yet" is not
+   "faster": do not run `compare` again and again until it says so. A second
+   look at a count chosen after the first is exploratory, and is reported beside
+   the first. Record the result in an improvements log beside the ledger,
+   including changes that saved nothing.
 
 ## Rules
 
 - **Never trade proof for speed.** Do not remove or weaken a required check,
   the merge gate, a security scan or test coverage. Do not add retries, widen
-  timeouts or skip tests to get green faster. Moving a test off the PR lane is
-  allowed only when it still runs before merge or on the default branch, from
-  an explicit list guarded by a test, with the owner's yes.
+  timeouts or skip tests to get green faster. Also never add `|| true` or
+  `continue-on-error`, delete or `.only` a test, cut workers to mask a race,
+  bypass a git hook, quarantine a test, set a commit status yourself, or add
+  `pull_request_target` or wider `permissions`. A changed assertion or expected
+  value is for a person to decide, because it can turn a failing test green
+  without fixing anything. `diff-guard.ts` checks these. Moving a test off the
+  PR lane is allowed only when it still runs before merge or on the default
+  branch, from an explicit list guarded by a test, with the owner's yes.
 - **Settings are the owner's.** Branch protection, rulesets, merge queues,
   required checks, secrets, runner capacity and anything that costs money are
   owner steps. Write them as commands or a list with expected monthly cost; do
@@ -125,7 +193,14 @@ edit the scripts for them.
   numbers from a few runs after it are provisional.
 - **Cache changes need warm runs.** The first run after a key or path change is
   cold. Judge it after several default-branch runs have saved and restored it.
-- **Use medians, not single runs.** The change-point table needs five runs on each side.
+- **Use medians, not single runs.** The change-point table needs five runs on
+  each side, and so does `compare`: with three a side no 95% interval can rule
+  out "no change", and with four only if every pair agrees
+  (`references/evidence.md`). A local timing is never the result.
+- **Only a settled window counts.** A window read while runs are still going
+  holds only the quick ones, so a "faster" can appear with no change at all.
+  `compare` refuses a window that ended less than 2 hours ago, or one the last
+  `pull` did not cover after it settled.
 - **Skipped, cancelled and never-started jobs are not fast.** Medians count
   passed jobs only. A job that never started (an Actions billing or spending
   limit, a missing runner) shows as failed with no time: fix that first, and

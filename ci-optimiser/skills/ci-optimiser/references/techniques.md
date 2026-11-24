@@ -120,6 +120,25 @@ thing in its own PR, measure again.
 - **Judge a cache change on warm runs.** The first run after a key change is
   cold. Compare after several runs on the default branch have saved and
   restored it, never on the first run.
+- **Parallel jobs that share one key.** A saved cache cannot be changed, so
+  the first job to save a key wins and the others restore whatever it built
+  (a lint job's cache for a test job). Give each job its own key (add the job
+  name), and check what each restored. One team's test jobs went from a
+  median of 76 s to 180 s after a shared Go cache key, and fell to 41 s with a
+  key per job (reported by CloudX, not reproduced here).
+- **A key that misses the toolchain.** A key built from the lock file alone
+  can hit while holding files a newer compiler or tool version cannot use.
+  Add the tool version to the key. Confirm with the tool's own hit rate
+  (`sccache --show-stats`, `ccache -s`), not the restore step's "hit".
+- **The cache has a size cap, and old entries leave.** GitHub keeps 10 GB per
+  repository by default, evicts the least recently used entries beyond it, and
+  drops an entry not read for 7 days (defaults; check the repository's
+  settings). A cache that was listed and is gone earlier than that points at
+  eviction: list sizes with `gh api repos/OWNER/NAME/actions/cache/usage`.
+  A manual delete looks the same, so name the reason before ranking it.
+- **Docker image builds** with no layer cache (`cache-from` and `cache-to`, or
+  a builder that keeps one) rebuild every layer each run. Read the build log
+  for layers rebuilt before adding one.
 
 ## 6. Balance shards, and split the file that fills one
 
@@ -241,6 +260,9 @@ their checks run again.
 
 ## 15. Trigger scope
 
+(Sections 15 to 20 are the later additions: trigger scope, a fast subset,
+build once, bill rounding, flaky reruns, and waiting for a machine.)
+
 Work that a change cannot affect is the cheapest work to remove, but only
 where the proof still runs somewhere.
 
@@ -312,6 +334,50 @@ legs bill as three minutes, though their work fits in one.
 - **Make it safe:** merge only legs that are **not** on the critical path. If
   the merged legs would take longer than the longest parallel job, merging
   makes the PR slower. This saves billing minutes, never wall time; say so.
+
+## 19. Flaky reruns
+
+A job that fails and then passes on a rerun of the same commit is a
+reliability cost, not a wait cost: the wait counts the final attempt only.
+
+- **Find:** jobs with a failed attempt and a later passing attempt of the same
+  run, in the ledger (same `runId`, `attempt` 1 and 2).
+- **Measure per occurrence:** the runner minutes of the failed attempt's jobs
+  that ran again, and the extra wait (first attempt's start to the passing
+  attempt's end, minus a typical passing run; an estimate, so show the actual
+  interval too). Add a daily cost on the last required finish. A flake in a
+  workflow that does not finish last costs no wait, unless its rerun holds a
+  runner, a slot or a shared resource another required job waits for.
+- **Make it safe:** find the cause (shared state, an order, a clock, a port, a
+  mock that answers 5xx: see section 8). Never add a retry, a longer timeout
+  or a quarantine: a flake that needs one has a bug, and a retry turns a
+  sometimes-failing test green without changing the code. One team that cut
+  its end-to-end suite from 174 tests to 87 saw the flake rate fall from 100%
+  to under 15% (reported by Clipboard, not reproduced here).
+
+## 20. Waiting for a machine
+
+Queue time is not a test problem. Before changing anything, find which limit
+the queued jobs hit.
+
+- **A plan's concurrent-job limit** (20 jobs, 5 on macOS, on the free plan;
+  check the owner's plan): jobs wait for others to finish. Fewer, folded jobs
+  or cancelled superseded runs help; a larger plan is an owner step.
+- **A `concurrency` group** that holds jobs one at a time, or a matrix with
+  `max-parallel` set: read the workflow.
+- **A runner label with no free machine:** self-hosted or provider runners
+  have their own capacity. Count queued jobs by label in the ledger.
+- **Approval or environment waits:** a long gap before the first job, or
+  between two jobs, that no job explains. Say which, from the workflow, before
+  naming a cause.
+- **Worker count against cores:** a test runner using 2 of 4 cores, or the
+  reverse. Check `nproc` on the runner (a standard hosted Linux runner has
+  more cores on a public repository than a private one: check the plan) and
+  the runner's worker setting. With ideal scaling, twice the workers halves the
+  time of tests that run in parallel: that is a ceiling. Repeat runs at each
+  worker count to measure it.
+- **Moving a job to another runner** (macOS especially) can drop platform
+  coverage and can change cost: an owner decision.
 
 ## Getting the data in a restricted session
 

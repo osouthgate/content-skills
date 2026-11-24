@@ -1,0 +1,6 @@
+{
+  "name": "made-up-cache-seed",
+  "private": true,
+  "scripts": { "test": "node --test" },
+  "packageManager": "pnpm@9.15.0"
+}

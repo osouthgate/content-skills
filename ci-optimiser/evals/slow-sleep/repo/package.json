@@ -1,0 +1,7 @@
+{
+  "name": "made-up-slow-sleep",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" },
+  "packageManager": "pnpm@9.15.0"
+}

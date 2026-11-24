@@ -1,0 +1,5 @@
+[
+  "test::the service is ready once it has had time to start",
+  "test::the service is not ready the moment it starts",
+  "test::whenReady resolves once the service is ready"
+]

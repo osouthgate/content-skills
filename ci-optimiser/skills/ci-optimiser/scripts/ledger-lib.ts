@@ -519,6 +519,50 @@ export function changePoints(
   return out.sort((a, b) => Math.abs(b.after - b.before) - Math.abs(a.after - a.before));
 }
 
+export interface Cohort {
+  workflow: string;
+  /** The job that ran longest in these runs (by that job's median over the window). */
+  longestJob: string;
+  runs: number;
+  wallP50: number | null;
+  wallP90: number | null;
+  /** This group's share of the workflow's total wall time over passed runs. */
+  share: number;
+}
+
+/**
+ * Runs that ran different jobs (a path filter, an `if:`, a docs-only push) wait different times, and
+ * one median over the mix describes none of them. Group each workflow's passed runs by the longest
+ * job each one ran, so every median covers runs that did comparable work.
+ */
+export function cohorts(runs: LedgerRun[], window: { from: string; to: string }): Cohort[] {
+  const inWin = runs.filter((r) => r.createdAt >= window.from && r.createdAt < window.to && r.conclusion === "success" && r.wallSeconds !== null);
+  const byWorkflow = new Map<string, LedgerRun[]>();
+  for (const r of inWin) byWorkflow.set(r.workflow, [...(byWorkflow.get(r.workflow) ?? []), r]);
+  const out: Cohort[] = [];
+  for (const [workflow, rs] of byWorkflow) {
+    const perJob = new Map<string, number[]>();
+    for (const r of rs) for (const j of r.jobs) if (j.seconds !== null && isSpeed(j.conclusion)) perJob.set(j.name, [...(perJob.get(j.name) ?? []), j.seconds]);
+    const median = new Map([...perJob].map(([name, secs]) => [name, quantile(secs, 0.5)!]));
+    const groups = new Map<string, LedgerRun[]>();
+    for (const r of rs) {
+      let best: string | null = null;
+      for (const j of r.jobs) {
+        if (j.seconds === null || !isSpeed(j.conclusion)) continue;
+        if (best === null || median.get(j.name)! > median.get(best)! || (median.get(j.name)! === median.get(best)! && j.name < best)) best = j.name;
+      }
+      const key = best ?? "(no job ran)";
+      groups.set(key, [...(groups.get(key) ?? []), r]);
+    }
+    const total = rs.reduce((a, r) => a + r.wallSeconds!, 0);
+    for (const [longestJob, g] of groups) {
+      const walls = g.map((r) => r.wallSeconds!);
+      out.push({ workflow, longestJob, runs: g.length, wallP50: quantile(walls, 0.5), wallP90: quantile(walls, 0.9), share: total > 0 ? walls.reduce((a, b) => a + b, 0) / total : 0 });
+    }
+  }
+  return out.sort((a, b) => a.workflow.localeCompare(b.workflow) || b.share - a.share);
+}
+
 function mins(s: number | null): string {
   return s === null ? "—" : (s / 60).toFixed(1);
 }
@@ -547,7 +591,7 @@ export function renderReport(
   const out: string[] = [];
   out.push(`# CI report — last ${opts.days} days to ${to.slice(0, 10)}`, "");
   out.push(
-    `From \`${opts.source ?? "the ledger"}\` (${cur.length} runs in the window, ${runs.length} loaded). Times are runner time from the GitHub API. Total minutes count passed and failed jobs; medians count passed jobs only; skipped and cancelled jobs are left out.`,
+    `From \`${opts.source ?? "the ledger"}\` (${cur.length} runs in the window, ${runs.length} loaded). Times are runner time from the GitHub API. Total minutes count passed and failed jobs; medians count passed jobs only; skipped and cancelled jobs are left out. Runs still going when the ledger was pulled are not in it yet, and fast runs finish first, so the newest hours lean fast: pull again later before trusting them.`,
     "",
   );
 
@@ -569,6 +613,21 @@ export function renderReport(
           mins(quantile(rs.map((r) => r.queueSeconds).filter((x): x is number => x !== null), 0.5)),
           rs.filter((r) => r.conclusion === "failure").length,
         ]),
+    ),
+    "",
+  );
+
+  const groups = cohorts(runs, win);
+  out.push(
+    "## Wall time by kind of run",
+    "",
+    "The workflow table above is a blend. Here each group is the passed runs whose longest job was the same, so a docs-only push and a full run do not share one median. Read the group with the largest share as the wait that matters; never quote the blend as the wait.",
+    "",
+  );
+  out.push(
+    table(
+      ["workflow", "longest job", "runs", "wall p50 min", "wall p90 min", "share of wall"],
+      groups.slice(0, top * 2).map((g) => [g.workflow, g.longestJob, g.runs, mins(g.wallP50), mins(g.wallP90), `${(g.share * 100).toFixed(0)}%`]),
     ),
     "",
   );

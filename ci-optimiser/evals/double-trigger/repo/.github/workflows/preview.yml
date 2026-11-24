@@ -1,0 +1,14 @@
+name: Preview
+
+# A preview site for every commit on every branch. Reviewers open the link from the commit status.
+on:
+  push:
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/deploy-preview.sh "${GITHUB_SHA}"
