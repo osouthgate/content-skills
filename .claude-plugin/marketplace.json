@@ -58,6 +58,11 @@
       "description": "Trace a problem to a root cause with Five Whys: an evidenced cause chain, a removal test, and countermeasures that prevent recurrence."
     },
     {
+      "name": "flowcode",
+      "source": "./flowcode",
+      "description": "Run a task as a staged multi-agent workflow: haiku to look, sonnet to build, opus as the reviewer on Claude Code, with fuller instructions for Codex and other hosts."
+    },
+    {
       "name": "handoff-to-agent",
       "source": "./handoff-to-agent",
       "description": "Cross-harness session handoff: summarize this session into a handoff document, print a paste-ready first-move prompt, then ask before spawning cursor/agent, claude, codex, or agy in Herdr."
