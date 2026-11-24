@@ -53,6 +53,28 @@ function onPullRequest(on: string[]): boolean {
   return on.some((l) => /\bpull_request\b(?!_target)/.test(l));
 }
 
+/**
+ * `on` holds a `push` trigger with no `branches:` (or `tags:`) filter, so it also
+ * fires for every commit on a PR branch. Handles `on: push`, `on: [push, ...]`,
+ * a list item and the block form.
+ */
+function pushWithoutBranchFilter(on: string[]): boolean {
+  const inline = (on[0] ?? "").replace(/^[^:]*:/, "");
+  if (/\bpush\b/.test(inline)) return true;
+  for (let i = 1; i < on.length; i++) {
+    const line = on[i]!;
+    if (/^\s*-\s*push\s*$/.test(line)) return true;
+    if (!/^\s*push\s*:/.test(line)) continue;
+    const indent = indentOf(line);
+    let filtered = /\b(branches|tags)\b/.test(line.replace(/^\s*push\s*:/, ""));
+    for (let j = i + 1; j < on.length && indentOf(on[j]!) > indent; j++) {
+      if (/^\s*(branches|tags)\s*:/.test(on[j]!)) filtered = true;
+    }
+    return !filtered;
+  }
+  return false;
+}
+
 export function scanWorkflow(file: string, text: string): Hint[] {
   const hints: Hint[] = [];
   const { top, jobs } = outline(text);
@@ -60,6 +82,14 @@ export function scanWorkflow(file: string, text: string): Hint[] {
   const add = (job: string | null, code: string, t: string): void => {
     hints.push({ file, job, code, text: t });
   };
+
+  if (onPullRequest(on) && pushWithoutBranchFilter(on)) {
+    add(
+      null,
+      "double-trigger",
+      "Runs on both `push` (no `branches:` filter) and `pull_request`: a commit on a PR branch can run twice. Check the ledger for the same commit with both events on a non-default branch. Before filtering push to the default branch, confirm the required check is the pull_request one and that the push run has no side effect the PR run lacks (preview deploy, tagged image, cache warm).",
+    );
+  }
 
   if (onPullRequest(on) && !top.has("concurrency") && !jobs.some((j) => j.body.some((l) => /^\s*concurrency\s*:/.test(l)))) {
     add(
@@ -85,6 +115,18 @@ export function scanWorkflow(file: string, text: string): Hint[] {
     }
     if (/playwright install/.test(body) && !/ms-playwright/.test(body)) {
       add(job.name, "browser-download", "Playwright downloads its browsers on every run. Check that step's time in the ledger; a cache of ~/.cache/ms-playwright keyed on the Playwright version may help.");
+    }
+    if (/^\s*continue-on-error\s*:\s*true\b/m.test(body)) {
+      add(job.name, "masked-failure", "`continue-on-error: true` lets a step or job fail without failing the run. Check whether anyone reads it. Report it to the owner; do not remove or keep it as a speed-up, because it changes what the check proves.");
+    }
+    if (/^\s*max-parallel\s*:\s*1\s*$/m.test(body)) {
+      add(job.name, "serial-matrix", "`max-parallel: 1` runs the matrix one leg at a time. Check why (a shared resource, an ordering need). If the legs are independent, parallel legs cut wall time at the same total cost.");
+    }
+    if (/(?:^|[\s;&|])sleep\s+\d+/m.test(body)) {
+      add(job.name, "fixed-sleep", "A fixed `sleep` waits its full time on every run. Check what it waits for; a health check or a poll on the event usually ends sooner and fails clearer. Keep any wait a test truly needs.");
+    }
+    if (/^\s*key\s*:.*\$\{\{[^}]*(github\.(sha|run_id|run_number|run_attempt)|now)\b/m.test(body) && !/^\s*restore-keys\s*:/m.test(body)) {
+      add(job.name, "unstable-cache-key", "A cache key that holds the commit or run id is new on every run, and there is no `restore-keys` fallback, so it never hits. Check the cache's hit rate in a job log; a key on the lock file's hash is stable until the inputs change.");
     }
     const runSteps = (body.match(/^\s*(?:-\s+)?run\s*:/gm) ?? []).length;
     if (runSteps >= 10 && !/^\s*(strategy|needs)\s*:/m.test(body)) {

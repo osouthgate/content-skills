@@ -60,7 +60,8 @@ time, so one budget for mixed runners makes red runs that are not real.
 | Install and scripts | | The fastest package manager this repo's tools support. A repo rule ("only X") is a measured reason until the owner changes it |
 | Tests | under 60 s per shard, long term | Isolate state per worker; reset state after every file; run in random order to flush leaks; shard by measured duration; buy cores before shards and match concurrency to cores |
 | Shape | | Lint, type check, build and tests in parallel jobs; move slow checks that do not depend on each other out of the slowest job |
-| Selection | | On PRs run only what the diff can reach, with forced full runs on risky paths and path-reading tests always run. **Then hide a real change on purpose and confirm CI goes red, not green.** Needs rule 1 first |
+| Selection | | On PRs run only what the diff can reach, with forced full runs on risky paths and path-reading tests always run. **Then hide a real change on purpose and confirm CI goes red, not green.** Measure the selectable share over the last N merged PRs, and shadow the selection for weeks before it decides anything. Needs rule 1 first |
+| Matrix | | A fast subset on PRs and the wide matrix after merge or on a schedule (techniques.md section 16); never move a leg that fails alone. Needs rule 1 first |
 | Local | under 9 s | A pre-push hook that runs format, lint and type check on changed files |
 | Keep it fast | | Fail a job that exceeds its budget, only after budgets exist for each runner class |
 

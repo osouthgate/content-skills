@@ -48,6 +48,16 @@ thing in its own PR, measure again.
     group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   ```
+- **A commit that runs twice.** A workflow on both `push` (no `branches:`
+  filter) and `pull_request` runs every PR commit once per event.
+  - **Find:** in the ledger, the same commit with a `push` run on a
+    non-default branch and a `pull_request` run. A push run on the default
+    branch that shares a PR's commit is a post-merge run; do not count it.
+  - **Make it safe:** limit `push` to the default branch only after two
+    checks. The required check must be the `pull_request` one (otherwise merges
+    block). And the push run must have no side effect the PR run lacks: a
+    per-commit preview deploy, a tagged image or a cache warm makes it not
+    redundant.
 
 ## 3. Move tests off the pull-request lane, not out of CI
 
@@ -90,6 +100,26 @@ thing in its own PR, measure again.
   let PR code write a cache that the default branch reads. On self-hosted
   runners, a store shared by a host's runners can replace the cache step.
   Rolling out runner changes happens outside the repo: owner step.
+- **Seed the cache from the default branch.** A branch reads its own caches and
+  its base branch's, never another PR's. If only PR runs save the cache, every
+  new PR starts cold.
+  - **Find:** the cache step's hit or miss line in PR job logs, and whether any
+    job on a push to the default branch (or a schedule) saves the same key. A
+    save in a merge queue run does not count: it lands on a temporary ref a new
+    branch cannot read.
+  - **Make it safe:** save with the same key template as the reader, from a
+    push to the default branch (or a small warm-up workflow with
+    `workflow_dispatch`). Keep the lock file hash in the key; widening a key
+    to force a hit risks stale dependencies. Fork PRs can read the base
+    branch's cache, so seeding helps them without giving them write access.
+- **A cache can cost more than it saves.** Restoring a large archive (download,
+  then unpack onto the runner's disk) can take longer than a warm install it
+  replaces. Compare the restore step's time on a hit with the install step's
+  time on a miss, from the ledger or job logs, before adding a cache for a
+  fast install. If restore is slower, remove the cache.
+- **Judge a cache change on warm runs.** The first run after a key change is
+  cold. Compare after several runs on the default branch have saved and
+  restored it, never on the first run.
 
 ## 6. Balance shards, and split the file that fills one
 
@@ -191,7 +221,7 @@ their checks run again.
 
 ## 14. Hygiene checklist
 
-`scripts/workflow-scan.ts` checks the first five automatically.
+`scripts/workflow-scan.ts` checks the first ten automatically.
 
 | Check |
 |---|
@@ -200,9 +230,88 @@ their checks run again.
 | Clones are shallow unless a step reads history |
 | Dependency and browser downloads are cached (technique 5) |
 | Long serial jobs are split where the parts are independent (technique 4) |
+| One commit does not run on both `push` and `pull_request` (technique 2) |
+| No `continue-on-error: true` hides a failure (report it; never change it to save time) |
+| No matrix has `max-parallel: 1` without a reason |
+| No fixed `sleep` waits for a service (technique 7) |
+| No cache key holds the commit or run id without a `restore-keys` fallback (technique 5) |
 | Shards are balanced by recorded time, not file count |
 | One database, port or container per parallel worker |
 | A remote build cache, if the build tool has one, with complete cache keys (owner step if it needs a token) |
+
+## 15. Trigger scope
+
+Work that a change cannot affect is the cheapest work to remove, but only
+where the proof still runs somewhere.
+
+- **Path filters:** an expensive workflow (full build, browser tests, a
+  scanner matrix) with no `paths` or `paths-ignore` runs for a docs-only PR.
+  Include everything the workflow really reads: code under test, shared
+  support, fixtures, config, lock file, container image and the workflow
+  itself. A required check that is skipped by a path filter stays pending
+  forever: use a small always-running job with the same name, or ask the owner.
+- **Draft PRs:** an expensive job on every push to a draft is often unread.
+  Gate it with `github.event.pull_request.draft == false` only if the required
+  checks still run when the PR is marked ready (`ready_for_review` in `types`).
+- **Event types:** `pull_request` runs on `opened`, `synchronize` and
+  `reopened` by default. Adding `edited`, `labeled` or `assigned` re-runs CI
+  for a title or label change. Keep them out unless a job reads them.
+- **Filter before the runner starts.** A job that checks a comment's author or
+  body in a step has already taken a runner. Put the check in the job's `if:`.
+- **Schedules:** a cron more often than anyone reads the result wastes runners;
+  see section 10 for start-time drift.
+- **Workflow chains:** `workflow_run` hand-offs add a queue wait per link.
+  Jobs with `needs:` in one workflow start sooner; check the `needs:` a job
+  does not use as well.
+- **Shard matrices:** `fail-fast: false` keeps every shard running after one
+  fails. Keep it only where each shard's result is worth reading.
+
+## 16. A fast subset before merge, the full matrix after
+
+Every PR waiting for every OS, runtime version and heavy configuration is
+often more than the merge decision needs.
+
+- **Find:** a PR workflow that runs a wide matrix and sets the wall time. Over
+  a long window (not a few hours), count each leg's **leg-unique failures**:
+  runs where that leg failed and every other leg passed. Ignore skipped legs
+  and any job that only reports other jobs' results.
+- **Make it safe:**
+  - A leg with leg-unique failures catches something no other leg catches. Do
+    not move it. A subset on one OS cannot stand in for another OS.
+  - Keep on the PR the oldest and newest supported runtime on the main OS, plus
+    every leg that fails alone. Move the rest to a push on the default branch,
+    a merge queue, or a schedule often enough to keep the unproven window short.
+  - A red post-merge run must reach an owner and must block a release. Every
+    merged commit is covered by a run that starts on the merge.
+  - Keep one required check on the PR path. Do not leave a moved job listed as
+    required: PRs would wait for a check that never runs.
+  - Measure the selectable share: over the last N merged PRs, how often the
+    proposed subset would have reached the same result as the full matrix.
+    Replay known red commits and plant a defect aimed at a moved leg. If the
+    evidence does not justify removing a leg from the merge gate, it is not a
+    speed-up.
+
+## 17. Build once, test on each platform
+
+- **Find:** a matrix where each platform builds and tests, and one platform
+  (Windows, ARM, an emulated architecture under QEMU) is the long pole because
+  of compile time. Split its compile time from its test time with step timings.
+- **Make it safe:** build the test binaries on a fast runner (cross-compiling
+  for the target), upload them as an artifact, and run them natively on the
+  target. Prefer a native runner over emulation. Keep a fully native
+  build-and-test of that platform somewhere (after merge or on a schedule): a
+  cross-built binary can differ in linker, toolchain or bundled libraries. The
+  saving is the compile step's time, not the test time, which stays.
+
+## 18. Bill rounding
+
+Hosted runners bill each job rounded up to the minute. Three 20-second matrix
+legs bill as three minutes, though their work fits in one.
+
+- **Find:** many sub-minute legs of one matrix, all on the same runner class.
+- **Make it safe:** merge only legs that are **not** on the critical path. If
+  the merged legs would take longer than the longest parallel job, merging
+  makes the PR slower. This saves billing minutes, never wall time; say so.
 
 ## Getting the data in a restricted session
 
@@ -222,3 +331,7 @@ their checks run again.
 - A red check after a speed change is real until shown otherwise: check the
   same test on the default branch before calling it flaky.
 - Estimates are not savings. Record the measured saving after a few runs.
+- A file that looks wrong may be that way on purpose. Read its git history
+  (`git log -p -- <file>`) and the PR that added the line before changing it.
+  A change that contradicts the recorded intent is a policy change for the
+  owner, not a quick win.
