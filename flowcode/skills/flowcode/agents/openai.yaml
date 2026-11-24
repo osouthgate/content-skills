@@ -1,0 +1,6 @@
+interface:
+  display_name: "flowcode"
+  short_description: "Look, build, review: a staged multi-agent workflow with an independent reviewer"
+  default_prompt: "Use $flowcode to run this task as a staged workflow: cheap models to look, a mid-tier model to build, and the strongest model as an independent reviewer."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,13 @@
+{
+  "name": "flowcode",
+  "description": "Run a task as a staged multi-agent workflow: haiku to look, sonnet to build, opus as the reviewer on Claude Code, with fuller instructions for Codex and other hosts.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Oliver Southgate",
+    "url": "https://github.com/osouthgate"
+  },
+  "homepage": "https://github.com/osouthgate/content-skills",
+  "repository": "https://github.com/osouthgate/content-skills",
+  "license": "MIT",
+  "keywords": ["workflow", "subagents", "multi-agent", "orchestration", "review", "claude", "codex", "cursor"]
+}

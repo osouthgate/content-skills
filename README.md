@@ -24,6 +24,7 @@ claude plugin install worktree-cleanup@content-skills
 claude plugin install disk-cleanup@content-skills
 claude plugin install ci-optimiser@content-skills
 claude plugin install 5-whys@content-skills
+claude plugin install flowcode@content-skills
 # then, inside a project:  /promise adopt
 ```
 
@@ -43,6 +44,7 @@ claude plugin install 5-whys@content-skills
 - `disk-cleanup` - Review disk and Docker usage; prepare approved clean-up plans for build cache, individual stopped containers/unused images and download caches. Docker volumes and saved application data remain protected. Script and skill work on Claude, Codex and Cursor. See [`disk-cleanup/README.md`](disk-cleanup/README.md).
 - `ci-optimiser` - Measure GitHub Actions time with a run ledger (commit, PR, wall, queue, job and step times), find the biggest cost and the commit where a job changed speed, scan workflows for slow patterns, and make CI faster one measured change at a time. Never drops required checks, tests or security scans. Node 22.18+, no packages. See [`ci-optimiser/README.md`](ci-optimiser/README.md).
 - `5-whys` - Trace a problem to a root cause with Five Whys: an evidenced cause chain, a removal test that separates a root cause from a contributing factor, and countermeasures aimed at recurrence. English only. A short technique, not a full safety investigation. Adapted from [awesome-skills/5-whys-skill](https://github.com/awesome-skills/5-whys-skill). See [`5-whys/README.md`](5-whys/README.md).
+- `flowcode` - Run a task as a staged multi-agent workflow: look, build, review. A thin router: on Claude Code it is one instruction (a dynamic workflow, haiku to look, sonnet to build, opus as the reviewer); on Codex, Cursor and other hosts it reads fuller step-by-step instructions. See [`flowcode/README.md`](flowcode/README.md).
 
 For why the same disk growth returns, start at [`STORAGE_OPTIMIZATION.md`](STORAGE_OPTIMIZATION.md). Each installed skill carries its own prevention note.
 
